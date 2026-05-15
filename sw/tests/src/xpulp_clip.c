@@ -4,7 +4,7 @@
 #include <snrt.h>
 
 int main() {
-#ifdef SNRT_SUPPORTS_XPULP
+#ifdef SNRT_SUPPORTS_PULP
     uint32_t i = snrt_global_core_idx();
     snrt_cluster_hw_barrier();
 
