@@ -4,6 +4,7 @@
 #include <snrt.h>
 
 int main() {
+#ifdef SNRT_SUPPORTS_SMALLFLOAT
     if (snrt_is_compute_core()) {
         int errs = 33;
 
@@ -320,5 +321,6 @@ int main() {
 
         return errs;
     }
+#endif
     return 0;
 }
