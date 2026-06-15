@@ -23,7 +23,7 @@
 #define DMSTAT_FUNCT7 0b0000101
 #define DMSTR_FUNCT7 0b0000110
 #define DMREP_FUNCT7 0b0000111
-#define DMINIT_FUNCT7 0b0001000
+#define DMINIT_FUNCT7 0b0001001
 
 #define R_TYPE_ENCODE(funct7, rs2, rs1, funct3, rd, opcode)                    \
     ((funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | \
@@ -482,7 +482,7 @@ inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value, uint32_t si
         asm volatile(".word %1\n"
                     : "=r"(reg_txid)
                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                        10, OP_CUSTOM1)),
+                                        13, OP_CUSTOM1)),
                     "r"(reg_size));
 
     }
@@ -493,7 +493,7 @@ inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value, uint32_t si
         asm volatile(".word %1\n"
                     : "=r"(reg_txid)
                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                        10, OP_CUSTOM1)),
+                                        13, OP_CUSTOM1)),
                     "r"(reg_size));
     }
     else {
@@ -508,7 +508,7 @@ inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value, uint32_t si
         asm volatile(".word %1\n"
                     : "=r"(reg_txid)
                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                        10, OP_CUSTOM1)),
+                                        13, OP_CUSTOM1)),
                     "r"(reg_size));
 
     }

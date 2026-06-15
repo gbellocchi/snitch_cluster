@@ -20,7 +20,8 @@ int main() {
         buffer_src[i] = 0x55555555;
     }
 
-    uint8_t byte = 0x11;
+    snrt_fence();
+
     // Write data to main memory.
     snrt_dma_txid_t id =
         snrt_dma_memset_init_1d((uint64_t)buffer, 0x55, sizeof(buffer), 0);
@@ -32,6 +33,7 @@ int main() {
     }
 
     // Write data to L1.
+    snrt_fence();
     id = snrt_dma_memset_init_1d((uint64_t)buffer_dst, 0xff, sizeof(buffer), 0);
     snrt_dma_wait_all_channels(0);
 
