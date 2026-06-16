@@ -551,7 +551,7 @@ module snitch_cluster
       logic [PhysicalAddrWidth-1:0] cfg;
       logic [WideDataWidth-1:0]     term;
       logic [WideDataWidth/8-1:0]   strb;
-      logic [WideIdWidthOut-1:0]    id;
+      logic [WideIdWidthIn-1:0]     id;
   } init_req_chan_t;
 
   typedef struct packed {
@@ -575,7 +575,7 @@ module snitch_cluster
   `OBI_TYPEDEF_MINIMAL_R_OPTIONAL(r_opt_t)
 
   `OBI_TYPEDEF_TYPE_A_CHAN_T(obi_a_chan_t, addr_t, data_dma_t, strb_dma_t, id_dma_mst_t, a_opt_t)
-  `OBI_TYPEDEF_TYPE_R_CHAN_T(obi_r_chan_t, data_dma_t, id_dma_slv_t, r_opt_t)
+  `OBI_TYPEDEF_TYPE_R_CHAN_T(obi_r_chan_t, data_dma_t, id_dma_mst_t, r_opt_t)
 
   `OBI_TYPEDEF_REQ_T(obi_dma_req_t, obi_a_chan_t)
   `OBI_TYPEDEF_RSP_T(obi_dma_rsp_t, obi_r_chan_t)
@@ -916,7 +916,7 @@ module snitch_cluster
     .axi_resp_t (axi_mst_dma_resp_t),
     .AddrWidth (PhysicalAddrWidth),
     .AxiDataWidth (WideDataWidth),
-    .IdWidth (WideIdWidthOut),
+    .IdWidth (WideIdWidthIn),
     .MemDataWidth (WideDataWidth),
     .BufDepth (MemoryMacroLatency + 1)
   ) i_axi_to_mem_split_soc_in (
@@ -967,7 +967,7 @@ module snitch_cluster
         .tcdm_rsp_t (tcdm_dma_rsp_t),
         .AddrWidth (PhysicalAddrWidth),
         .DataWidth (WideDataWidth),
-        .IdWidth (WideIdWidthOut),
+        .IdWidth (WideIdWidthIn),
         .UserWidth (CoreUserWidth),
         .BufDepth (MemoryMacroLatency + 1),
         .NumChannels (DMANumChannels)
