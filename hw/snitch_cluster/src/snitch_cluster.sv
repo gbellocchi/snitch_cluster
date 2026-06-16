@@ -947,10 +947,18 @@ module snitch_cluster
   // ------------
   // TCDM Arbiter
   // ------------
+  localparam bit HasDmaCore = |Xdma;
+
+  // Bridge the DMA OBI bus to the shared TCDM DMA bus.
+  //
+  // snitch_cc exposes the DMA OBI bus ports for every core, regardless of whether DMA is enabled.
+  // The loop below iterates over all cores so that:
+  // - The single DMA-capable core (Xdma[i] == 1) gets a real obi_to_tcdm bridge.
+  // - All other cores get their obi_dma_res tied to zero, since no bridge is needed and the ports must still be driven.
+  //
+  // At most one core may have Xdma set (enforced by `ASSERT_INIT(NumberDMA, $onehot0(Xdma))` below).
+  // This guarantees that tcdm_dma_req has exactly one driver.
   for (genvar i = 0; i < NrCores; i++) begin : gen_core_obi_to_tcdm
-    // This currently assumes only one DMA core is present in the system. However this limitation
-    // could easily be overcome by adapting the number of inputs to the i_dma_interconnect
-    // according to the number of DMA cores present.
     if (Xdma[i]) begin : gen_dma_obi_to_tcdm
       obi_to_tcdm #(
         .obi_req_t (obi_dma_req_t),
@@ -972,9 +980,16 @@ module snitch_cluster
         .tcdm_rsp_i (tcdm_dma_rsp)
       );
     end else begin : gen_dma_obi_to_tcdm_stub
+      // No DMA on this core: tie off its response port.
       assign obi_dma_res[i] = '0;
     end
   end
+  // When no core has DMA, tie off to avoid undriven networks.
+  if (!HasDmaCore) begin : gen_dma_bus_stub
+    assign tcdm_dma_req = '0;
+    assign dma_events   = '0;
+  end
+
   tcdm_dma_req_t [NumDMAIcoInputs-1:0] dma_interconnect_req;
   tcdm_dma_rsp_t [NumDMAIcoInputs-1:0] dma_interconnect_rsp;
 
@@ -1371,7 +1386,7 @@ module snitch_cluster
       end
     end
     if (Xdma[i]) begin : gen_dma_connection
-      for (genvar j = 0; j < DMANumChannels; j++) begin : gen_dma_connection
+      for (genvar j = 0; j < DMANumChannels; j++) begin : gen_dma_axi_connection
         assign wide_axi_mst_req[SDMAMst + j] = axi_dma_req[j];
         assign axi_dma_res[j] = wide_axi_mst_rsp[SDMAMst + j];
       end
