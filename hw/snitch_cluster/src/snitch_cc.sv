@@ -594,6 +594,7 @@ module snitch_cc #(
     // tie-off unused signals
     assign axi_dma_req_o    = '0;
     assign axi_dma_busy_o   = '0;
+    assign obi_dma_req_o    = '0;
     assign dma_qready       = '0;
     assign dma_resp         = '0;
     assign dma_pvalid       = '0;
