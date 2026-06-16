@@ -104,7 +104,9 @@ $(SN_BIN_DIR)/$(TARGET).vsim: $(SN_VSIM_BUILDDIR)/compile.vsim.tcl $(SN_TB_CC_SO
 	@echo "#!/bin/bash" > $@.gui
 	@echo 'binary=$$(realpath $$1)' >> $@.gui
 	@echo 'echo $$binary > .rtlbinary' >> $@.gui
-	@echo '$(SN_VSIM) +permissive $(SN_VSIM_FLAGS) \
+	@echo 'WAVE_ARGS=()' >> $@.gui
+	@echo '[ -n "$$QUESTA_WAVE_DO" ] && WAVE_ARGS=(-do "do $$QUESTA_WAVE_DO")' >> $@.gui
+	@echo '$(SN_VSIM) +permissive "$${WAVE_ARGS[@]}" $(SN_VSIM_FLAGS) \
 				-quiet -ldflags "-Wl,-rpath,$(SN_FESVR)/lib -L$(SN_FESVR)/lib -lfesvr -lutil" \
 				$(SN_VSIM_TOP_MODULE)_opt +permissive-off ++$$binary ++$$2' >> $@.gui
 	@chmod +x $@.gui
