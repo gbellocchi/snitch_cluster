@@ -51,8 +51,6 @@ module snitch_cluster
   parameter int unsigned NrCores            = 8,
   /// Data/TCDM memory depth per cut (in words).
   parameter int unsigned TCDMDepth          = 1024,
-  /// Zero memory address region size (in kB).
-  parameter int unsigned ZeroMemorySize     = 64,
   /// External memory address region size (in kB). This is the address region
   /// mapped to the `narrow_ext` port.
   parameter int unsigned ExtMemorySize      = 1,
@@ -674,11 +672,6 @@ module snitch_cluster
   assign cluster_periph_start_address = IntBootromEnable ? bootrom_end_address : tcdm_end_address;
   assign cluster_periph_end_address   = cluster_periph_start_address + ClusterPeriphSize * 1024;
 
-  // gbellocchi: Removing zero_mem address range. Should it be used for peripherals?
-  // addr_t zero_mem_start_address, zero_mem_end_address;
-  // assign zero_mem_start_address = cluster_periph_end_address;
-  // assign zero_mem_end_address   = cluster_periph_end_address + ZeroMemorySize * 1024;
-
   addr_t ext_mem_start_address, ext_mem_end_address;
   assign ext_mem_start_address = cluster_periph_end_address;
   assign ext_mem_end_address   = ext_mem_start_address + ExtMemorySize * 1024;
@@ -695,10 +688,6 @@ module snitch_cluster
 
   localparam addr_t PeriphAliasStart = IntBootromEnable ? BootRomAliasEnd : TCDMAliasEnd;
   localparam addr_t PeriphAliasEnd   = PeriphAliasStart + ClusterPeriphSize * 1024;
-
-  // gbellocchi: Removing zero_mem address range.
-  // localparam addr_t ZeroMemAliasStart = PeriphAliasEnd;
-  // localparam addr_t ZeroMemAliasEnd   = PeriphAliasEnd + ZeroMemorySize * 1024;
 
   localparam addr_t ExtAliasStart = PeriphAliasEnd;
   localparam addr_t ExtAliasEnd   = ExtAliasStart + ExtMemorySize * 1024;
