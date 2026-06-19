@@ -958,7 +958,7 @@ module snitch_cluster
         .DataWidth (WideDataWidth),
         .IdWidth (WideIdWidthIn),
         .UserWidth (CoreUserWidth),
-        .BufDepth (MemoryMacroLatency + 1),
+        .MemRespLat (MemoryMacroLatency),
         .NumChannels (DMANumChannels)
       ) i_obi_to_tcdm (
         .clk_i,

@@ -17,7 +17,7 @@ module obi_to_tcdm #(
     parameter int unsigned DataWidth   = 0,
     parameter int unsigned IdWidth     = 0,
     parameter int unsigned UserWidth   = 0,
-    parameter int unsigned BufDepth    = 1,
+    parameter int unsigned MemRespLat  = 0,
     parameter int unsigned NumChannels = 1
 ) (
     input  logic      clk_i,
@@ -36,64 +36,132 @@ module obi_to_tcdm #(
 
   `REQRSP_TYPEDEF_ALL(reqrsp, addr_t, data_t, strb_t, user_t)
 
-  // TCDM responds exactly BufDepth-1 cycles after a request is accepted.
-  localparam int unsigned LatencyStages = BufDepth - 1;
-
   for (genvar i = 0; i < NumChannels; i++) begin : gen_tcdm_obi_adapt
-    assign tcdm_req_o[i].q_valid = obi_req_i[i].req;
+    // Backpressure on new requests, while another transaction is still not consumed.
+    logic can_accept;
+    // Merged read-write R-channel responses after pipeline.
+    logic  obi_p_rvalid;
+    data_t obi_p_rdata;
+    id_t   obi_p_rid;
+    /// Hold register signals
+    logic  r_pending;
+    data_t r_data_reg;
+    id_t   r_id_reg;
+
+    assign tcdm_req_o[i].q_valid = obi_req_i[i].req & can_accept;
     assign tcdm_req_o[i].q = '{
-      addr: obi_req_i[i].a.addr,
+      addr:  obi_req_i[i].a.addr,
       write: obi_req_i[i].a.we,
-      amo: reqrsp_pkg::AMONone,
-      data: obi_req_i[i].a.wdata,
-      strb: obi_req_i[i].a.be,
-      user: '0
+      amo:   reqrsp_pkg::AMONone,
+      data:  obi_req_i[i].a.wdata,
+      strb:  obi_req_i[i].a.be,
+      user:  '0
     };
+    assign obi_rsp_o[i].gnt = tcdm_rsp_i[i].q_ready & can_accept;
 
-    assign obi_rsp_o[i].gnt = tcdm_rsp_i[i].q_ready;
+    /// This pipeline drives backward TCDM write acknowledgement, which would otherwise be missing 
+    /// as TCDM writes are fire-and-forget. Instead, OBI has a R-channel response for both reads 
+    /// and writes. The converter thus drives write ack after MemRespLat cycles from the first 
+    /// grant to the OBI interface.
+    if (MemRespLat > 0) begin : gen_id_pipeline
+      // Pipelined signals
+      logic [MemRespLat-1:0] p_ack;
+      logic [MemRespLat-1:0] p_we;
+      id_t  [MemRespLat-1:0] p_id;
 
-    // Propagate request ID and write flag. Stage 0 is loaded when a request is granted, while higher stages shift every cycle.
-    // TCDM does not assert p_valid for write transactions, so rvalid for writes is derived from write_pipeline instead.
-    if (LatencyStages > 0) begin : gen_id_pipeline
-      id_t  [LatencyStages-1:0] id_pipeline;
-      logic [LatencyStages-1:0] write_pipeline;
-
-      always_ff @(posedge clk_i or negedge rst_ni) begin
+      /// R-channel response pipeline.
+      always_ff @(posedge clk_i or negedge rst_ni) begin: r_resp_pipeline
         if (!rst_ni) begin
-          id_pipeline    <= '0;
-          write_pipeline <= '0;
+          p_ack <= '0;
+          p_we <= '0;
+          p_id <= '0;
         end else begin
-          if (obi_req_i[i].req && obi_rsp_o[i].gnt) begin
-            id_pipeline[0]    <= obi_req_i[i].a.aid;
-            write_pipeline[0] <= obi_req_i[i].a.we;
-          end
-          for (int k = 1; k < LatencyStages; k++) begin
-            id_pipeline[k]    <= id_pipeline[k-1];
-            write_pipeline[k] <= write_pipeline[k-1];
+          // Load current ack.
+          p_ack[0] <= obi_req_i[i].req & obi_rsp_o[i].gnt;
+          p_we[0] <= (obi_req_i[i].req & obi_rsp_o[i].gnt) ? obi_req_i[i].a.we  : '0;
+          p_id[0] <= (obi_req_i[i].req & obi_rsp_o[i].gnt) ? obi_req_i[i].a.aid : '0;
+          // Implement pipeline as a shift register.
+          for (int k = 1; k < MemRespLat; k++) begin
+            p_ack[k] <= p_ack[k-1];
+            p_we[k] <= p_we[k-1];
+            p_id[k] <= p_id[k-1];
           end
         end
       end
 
-      assign obi_rsp_o[i].rvalid = tcdm_rsp_i[i].p_valid | write_pipeline[LatencyStages-1];
+      /// Prepare data for the OBI R-channel.
+      assign obi_p_rvalid = tcdm_rsp_i[i].p_valid |
+                          (p_ack[MemRespLat-1] & p_we[MemRespLat-1]);
+      assign obi_p_rdata  = tcdm_rsp_i[i].p.data;
+      assign obi_p_rid    = p_id[MemRespLat-1];
 
+      // Prevent new grants while the hold register is occupied.
+      assign can_accept = ~r_pending & ~(obi_p_rvalid & ~obi_req_i[i].rready);
+
+      // Hold register: used to absorb an R response when the OBI interface cannot accept it.
+      always_ff @(posedge clk_i or negedge rst_ni) begin: r_hold_reg
+        if (!rst_ni) begin
+          r_pending <= '0;
+          r_data_reg <= '0;
+          r_id_reg <= '0;
+        end else begin
+          if (r_pending) begin
+            if (obi_req_i[i].rready) r_pending <= '0;
+          end else if (obi_p_rvalid && !obi_req_i[i].rready) begin
+            r_pending <= '1;
+            r_data_reg <= obi_p_rdata;
+            r_id_reg <= obi_p_rid;
+          end
+        end
+      end
+
+      // Assign local R response to OBI response interface.
+      assign obi_rsp_o[i].rvalid = r_pending | obi_p_rvalid;
       assign obi_rsp_o[i].r = '{
-        rdata:      tcdm_rsp_i[i].p.data,
-        rid:        id_pipeline[LatencyStages-1],
+        rdata:      r_pending ? r_data_reg : obi_p_rdata,
+        rid:        r_pending ? r_id_reg   : obi_p_rid,
         err:        1'b0,
         r_optional: '0
       };
-    end else begin : gen_id_zero_latency
-      // Zero-latency case: write response is valid in the same cycle as the grant; read response follows p_valid as usual.
-      assign obi_rsp_o[i].rvalid = tcdm_rsp_i[i].p_valid |
-                                   (obi_req_i[i].req & obi_rsp_o[i].gnt & obi_req_i[i].a.we);
 
+    // Zero-latency: write response is valid in the same cycle as the grant.
+    end else begin : gen_id_zero_latency
+      /// Prepare data for the OBI R-channel.
+      assign obi_p_rvalid = tcdm_rsp_i[i].p_valid |
+                            (obi_req_i[i].req & obi_rsp_o[i].gnt & obi_req_i[i].a.we);
+      assign obi_p_rdata  = tcdm_rsp_i[i].p.data;
+      assign obi_p_rid    = obi_req_i[i].a.aid;
+
+      // Prevent new grants while the hold register is occupied.
+      assign can_accept = ~r_pending;
+
+      // Hold register: used to absorb an R response when the OBI interface cannot accept it.
+      always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+          r_pending <= '0;
+          r_data_reg <= '0;
+          r_id_reg <= '0;
+        end else begin
+          if (r_pending) begin
+            if (obi_req_i[i].rready) r_pending <= '0;
+          end else if (obi_p_rvalid && !obi_req_i[i].rready) begin
+            r_pending <= '1;
+            r_data_reg <= obi_p_rdata;
+            r_id_reg <= obi_p_rid;
+          end
+        end
+      end
+
+      // Assign local R response to OBI response interface.
+      assign obi_rsp_o[i].rvalid = r_pending | obi_p_rvalid;
       assign obi_rsp_o[i].r = '{
-        rdata:      tcdm_rsp_i[i].p.data,
-        rid:        obi_req_i[i].a.aid,
+        rdata:      r_pending ? r_data_reg: obi_p_rdata,
+        rid:        r_pending ? r_id_reg  : obi_p_rid,
         err:        1'b0,
         r_optional: '0
       };
     end
+
   end
 
 endmodule
