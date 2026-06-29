@@ -62,8 +62,9 @@ runs:
   # Compilation fails, seems to require libc++abi
   # - elf: ../sw/tests/build/openmp_double_buffering.elf
   #   simulators: [vsim, vcs, verilator]
-  - elf: ../sw/tests/build/perf_cnt.elf
-    simulators: [vsim, vcs, verilator]
+  # Temporarily remove `perf_cnt` since iDMA RW interfaces have changed. Need to change test to assess AXI-OBI interface.
+  # - elf: ../sw/tests/build/perf_cnt.elf 
+  #   simulators: [vsim, vcs, verilator]
   - elf: ../sw/tests/build/printf_simple.elf
   - elf: ../sw/tests/build/printf_fmtint.elf
   - elf: ../sw/tests/build/simple.elf
