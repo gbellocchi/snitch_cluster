@@ -595,6 +595,7 @@ module snitch_cluster
       logic r_valid,  r_ready,  r_done, r_bw;
       logic w_valid,  w_ready,  w_done, w_bw;
       logic b_valid,  b_ready,  b_done;
+      logic obi_wr_req, obi_rd_req;
       logic dma_busy;
       axi_pkg::len_t aw_len, ar_len;
       axi_pkg::size_t aw_size, ar_size;
