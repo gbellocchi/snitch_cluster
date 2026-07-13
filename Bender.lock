@@ -81,7 +81,6 @@ packages:
     - common_cells
     - common_verification
     - obi
-    - register_interface
   obi:
     revision: 0155fc34e900c7c884e081c0a1114a247937ff69
     version: 0.1.7
