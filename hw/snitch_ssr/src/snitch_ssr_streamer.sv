@@ -14,9 +14,9 @@ module snitch_ssr_streamer import snitch_ssr_pkg::*; #(
   parameter int unsigned WPorts     = 0,
   parameter int unsigned AddrWidth  = 0,
   parameter int unsigned DataWidth  = 0,
+  parameter int unsigned UserWidth  = 0,
   parameter ssr_cfg_t [NumSsrs-1:0]  SsrCfgs = '0,
   parameter logic [NumSsrs-1:0][4:0] SsrRegs = '0,
-  parameter type tcdm_user_t  = logic,
   parameter type tcdm_req_t   = logic,
   parameter type tcdm_rsp_t   = logic,
   /// Derived parameter *Do not override*
@@ -56,10 +56,12 @@ module snitch_ssr_streamer import snitch_ssr_pkg::*; #(
   // This will *not* validate the configuration (see assertions below).
   function automatic isect_cfg_t derive_isect_cfg();
     // Ensure nonzero width parameters to keep derived types sane.
-    automatic isect_cfg_t ret = '{IndexWidth: 1, default: '0};
+    automatic isect_cfg_t ret;
+    ret = '{IndexWidth: 1, default: '0};
     for (int i = 0; i < NumSsrs; i++) begin
       if (SsrCfgs[i].IsectMaster) begin
-        automatic int unsigned DataBufDepth =
+        automatic int unsigned DataBufDepth;
+        DataBufDepth =
             SsrCfgs[i].DataCredits + 2*unsigned'(SsrCfgs[i].IndirOutSpill);
         if (DataBufDepth > ret.StreamctlDepth)
           ret.StreamctlDepth = DataBufDepth;
@@ -138,7 +140,7 @@ module snitch_ssr_streamer import snitch_ssr_pkg::*; #(
       .Cfg          ( SsrCfgs [i] ),
       .AddrWidth    ( AddrWidth   ),
       .DataWidth    ( DataWidth   ),
-      .tcdm_user_t  ( tcdm_user_t ),
+      .UserWidth    ( UserWidth   ),
       .tcdm_req_t   ( tcdm_req_t  ),
       .tcdm_rsp_t   ( tcdm_rsp_t  ),
       .isect_slv_req_t  ( isect_slv_req_t ),

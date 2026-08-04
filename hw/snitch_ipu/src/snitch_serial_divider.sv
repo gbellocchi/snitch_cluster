@@ -101,18 +101,16 @@ module snitch_serial_divider #(
   assign lzc_a_input = (signed_op & op_a_sign) ? {~op_a_i, 1'b0} : op_a_i;
   assign lzc_b_input = (signed_op & op_b_sign) ? ~op_b_i : op_b_i;
 
-  lzc #(
-    .MODE (1),  // count leading zeros
-    .WIDTH(WIDTH)
+  cc_lzc #(
+    .Width(WIDTH)
   ) i_lzc_a (
     .in_i   (lzc_a_input),
     .cnt_o  (lzc_a_result),
     .empty_o(lzc_a_no_one)
   );
 
-  lzc #(
-    .MODE (1),  // count leading zeros
-    .WIDTH(WIDTH)
+  cc_lzc #(
+    .Width(WIDTH)
   ) i_lzc_b (
     .in_i   (lzc_b_input),
     .cnt_o  (lzc_b_result),
@@ -122,7 +120,7 @@ module snitch_serial_divider #(
   assign shift_a = (lzc_a_no_one) ? WIDTH : lzc_a_result;
   assign div_shift = (lzc_b_no_one) ? WIDTH : lzc_b_result - shift_a;
 
-  assign op_b = op_b_i <<< $unsigned(div_shift);
+  assign op_b = op_b_i <<< div_shift;
 
   // the division is zero if |opB| > |opA| and can be terminated
   assign div_res_zero_d = (load_en) ? ($signed(div_shift) < 0) : div_res_zero_q;

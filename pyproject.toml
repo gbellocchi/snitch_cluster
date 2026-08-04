@@ -34,10 +34,12 @@ dependencies = [
     "pyelftools",
     "pyflexfloat",
     "pymakeutils>=1.4.0",
+    "pysynthutils",
     "pytablewriter",
     "pytest",
     "pyyaml",
     "reuse",
+    "riscv-opcodes",
     "tabulate",
     "termcolor",
     "yamllint",
@@ -64,6 +66,7 @@ all = [
 ]
 
 [tool.uv.sources]
+riscv-opcodes = { path = "sw/deps/riscv-opcodes", editable = true }
 torch = [
     { index = "pytorch-cpu" },
 ]
@@ -77,7 +80,6 @@ explicit = true
 "snitch.dnn" = "sw/kernels/dnn"
 "snitch.blas" = "sw/kernels/blas"
 "snitch.util" = "util"
-"snitch.nonfree" = "nonfree/util"
 
 [tool.pytest.ini_options]
 testpaths = ["util/bench/tests"]

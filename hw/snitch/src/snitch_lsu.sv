@@ -8,7 +8,7 @@
 /// `NumOutstandingMem` requests in total) and optionally NaNBox if used in a
 /// floating-point setting. It expects its memory sub-system to keep order (as if
 /// issued with a single ID).
-module snitch_lsu import cf_math_pkg::*; #(
+module snitch_lsu import cc_pkg::*; #(
   parameter int unsigned AddrWidth           = 32,
   parameter int unsigned DataWidth           = 32,
   parameter int unsigned UserWidth           = 0,
@@ -50,7 +50,7 @@ module snitch_lsu import cf_math_pkg::*; #(
   input  addr_t                lsu_qaddr_i,
   input  data_t                lsu_qdata_i,
   input  logic [1:0]           lsu_qsize_i,
-  input  reqrsp_pkg::amo_op_e  lsu_qamo_i,
+  input  snitch_pkg::amo_op_e  lsu_qamo_i,
   input  logic                 lsu_qrepd_i,  // Whether this is a sequencer repetition
   input  user_t                lsu_quser_i,  // User field for the axi transmission
   input  logic                 lsu_qvalid_i,
@@ -108,20 +108,21 @@ module snitch_lsu import cf_math_pkg::*; #(
     assign caq_pass = caq_lsu_gnt & ~caq_lsu_exists;
 
     // We need to stall on collisions with anything altering memory, including atomics
-    assign caq_alters_mem = lsu_qwrite_i | (lsu_qamo_i != reqrsp_pkg::AMONone);
+    assign caq_alters_mem = lsu_qwrite_i | (lsu_qamo_i != snitch_pkg::AMONone);
 
     // Gate downstream LSU on CAQ pass
     assign lsu_postcaq_qvalid = caq_pass & lsu_qvalid_i;
     assign lsu_qready_o = caq_pass & lsu_postcaq_qready;
 
-    id_queue #(
-      .data_t    ( logic [CaqTagWidth:0] ), // Store address tag *and* write enable
-      .ID_WIDTH  ( 1 ),                     // De facto 0: no reorder capability here
-      .CAPACITY  ( CaqDepth ),
-      .FULL_BW   ( 1 )
+    cc_id_queue #(
+      .data_t   ( logic [CaqTagWidth:0] ), // Store address tag *and* write enable
+      .IdWidth  ( 1 ),                     // De facto 0: no reorder capability here
+      .Capacity ( CaqDepth ),
+      .FullBw   ( 1 )
     ) i_caq (
       .clk_i,
       .rst_ni   ( ~rst_i ),
+      .clr_i    ( 1'b0 ),
       // Push in snooped accesses offloaded to downstream LSU
       .inp_id_i   ( '0 ),
       .inp_data_i ( {caq_qwrite_i, caq_qaddr_i[CaqTagWidth+DataAlign-1:DataAlign]} ),
@@ -188,15 +189,15 @@ module snitch_lsu import cf_math_pkg::*; #(
   logic laq_full, mem_full;
   logic laq_push;
 
-  fifo_v3 #(
-    .FALL_THROUGH ( 1'b0                ),
-    .DEPTH        ( NumOutstandingLoads ),
-    .dtype        ( laq_t               )
+  cc_fifo #(
+    .FallThrough ( 1'b0                ),
+    .Depth       ( NumOutstandingLoads ),
+    .data_t      ( laq_t               )
   ) i_fifo_laq (
     .clk_i,
     .rst_ni (~rst_i),
+    .clr_i (1'b0),
     .flush_i (1'b0),
-    .testmode_i(1'b0),
     .full_o (laq_full),
     .empty_o (/* open */),
     .usage_o (/* open */),
@@ -225,15 +226,15 @@ module snitch_lsu import cf_math_pkg::*; #(
     assign caq_pvalid_o = data_rsp_i.p_valid & data_req_o.p_ready;
   end
 
-  fifo_v3 #(
-    .FALL_THROUGH (1'b0),
-    .DEPTH (NumOutstandingMem),
-    .DATA_WIDTH (1 + CaqRespTrackSeq)
+  cc_fifo #(
+    .FallThrough (1'b0),
+    .Depth (NumOutstandingMem),
+    .DataWidth (1 + CaqRespTrackSeq)
   ) i_fifo_mem (
     .clk_i,
     .rst_ni (~rst_i),
+    .clr_i (1'b0),
     .flush_i (1'b0),
-    .testmode_i (1'b0),
     .full_o (mem_full),
     .empty_o (lsu_empty_o),
     .usage_o ( /* open */ ),
@@ -273,7 +274,7 @@ module snitch_lsu import cf_math_pkg::*; #(
 
   // Re-align write data.
   /* verilator lint_off WIDTH */
-  assign lsu_qdata = $unsigned(lsu_qdata_i);
+  assign lsu_qdata = lsu_qdata_i;
   always_comb begin
     unique case (lsu_qaddr_i[DataAlign-1:0])
       3'b000: data_qdata = lsu_qdata;

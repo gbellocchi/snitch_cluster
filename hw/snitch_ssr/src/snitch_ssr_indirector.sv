@@ -15,7 +15,6 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
   parameter int unsigned DataWidth = 0,
   parameter type tcdm_req_t   = logic,
   parameter type tcdm_rsp_t   = logic,
-  parameter type tcdm_user_t  = logic,
   parameter type isect_slv_req_t = logic,
   parameter type isect_slv_rsp_t = logic,
   parameter type isect_mst_req_t = logic,
@@ -123,7 +122,7 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
 
     // Index TCDM request (write-only)
     assign idx_req_o.q = '{addr: idx_addr, write: 1'b1,
-        strb: idx_strb_q, data: idx_data_q, amo: reqrsp_pkg::AMONone, default: '0};
+        strb: idx_strb_q, data: idx_data_q, amo: snitch_pkg::AMONone, default: '0};
 
     // Write index word when it is complete or when done is popped
     assign idx_req_o.q_valid = idx_word_valid_q;
@@ -139,13 +138,13 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
     `FFL(cfg_idx_isect_o, isect_cnt, isect_cnt_swap, '0, clk_i, rst_ni)
 
     // Counter for number of elements emitted by intersector
-    counter #(
-      .WIDTH            ( Cfg.IndexWidth ),
-      .STICKY_OVERFLOW  ( 1'b0 )
+    cc_counter #(
+      .Width          ( Cfg.IndexWidth ),
+      .StickyOverflow ( 1'b0 )
     ) i_isect_counter (
       .clk_i,
       .rst_ni,
-      .clear_i    ( isect_cnt_swap  ),
+      .clr_i      ( isect_cnt_swap  ),
       .en_i       ( isect_slv_up_hs ),
       .load_i     ( '0  ),
       .down_i     ( '0  ),
@@ -155,12 +154,13 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
     );
 
     // Cut timing paths from intersector slave port
-    spill_register #(
-      .T        ( logic [Cfg.IndexWidth:0] ),
-      .Bypass   ( Cfg.IsectSlaveSpill   )
+    cc_spill_register #(
+      .data_t ( logic [Cfg.IndexWidth:0] ),
+      .Bypass ( Cfg.IsectSlaveSpill   )
       ) i_spill_slv_idx (
       .clk_i,
       .rst_ni,
+      .clr_i    ( 1'b0 ),
       .valid_i  ( isect_slv_rsp_i.valid ),
       .ready_o  ( isect_slv_req_o.ready ),
       .data_i   ( {isect_slv_rsp_i.idx, isect_slv_rsp_i.done} ),
@@ -205,15 +205,15 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
     `FFLARNC(idx_word_valid_q, idx_word_valid_d, isect_slv_hs, idx_word_clr, 1'b0, clk_i, rst_ni)
 
     // Track done and decouple address emission from index write
-    stream_fifo #(
-      .FALL_THROUGH ( 0 ),
-      .DATA_WIDTH   ( 1 ),
-      .DEPTH        ( Cfg.IsectSlaveCredits )
+    cc_stream_fifo #(
+      .FallThrough ( 0 ),
+      .DataWidth   ( 1 ),
+      .Depth       ( Cfg.IsectSlaveCredits )
     ) i_done_fifo (
       .clk_i,
       .rst_ni,
+      .clr_i      ( 1'b0 ),
       .flush_i    ( 1'b0 ),
-      .testmode_i ( 1'b0 ),
       .usage_o    (  ),
       .data_i     ( isect_slv_done  ),
       .valid_i    ( isect_slv_hs    ),
@@ -336,7 +336,7 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
     end
 
     // Index TCDM request (read-only)
-    assign idx_req_o.q = '{addr: idx_addr, amo: reqrsp_pkg::AMONone, default: '0};
+    assign idx_req_o.q = '{addr: idx_addr, amo: snitch_pkg::AMONone, default: '0};
 
     // Index handshaking
     assign natit_ena          = cfg_indir_i & idx_cred_left & ~isect_mst_blk_q & ~natit_done_i;
@@ -344,15 +344,15 @@ module snitch_ssr_indirector import snitch_ssr_pkg::*; #(
     assign natit_ready_o      = natit_ena & idx_rsp_i.q_ready;
 
     // Index FIFO: stores full unserialized words.
-    fifo_v3 #(
-      .FALL_THROUGH ( 1'b0              ),
-      .DATA_WIDTH   ( DataWidth         ),
-      .DEPTH        ( Cfg.IndexCredits  )
+    cc_fifo #(
+      .FallThrough ( 1'b0              ),
+      .DataWidth   ( DataWidth         ),
+      .Depth       ( Cfg.IndexCredits  )
     ) i_idx_fifo (
       .clk_i,
       .rst_ni,
+      .clr_i      ( 1'b0 ),
       .flush_i    ( isect_mst_blk_q   ),
-      .testmode_i ( 1'b0              ),
       .full_o     (  ),                     // Credit counter prevents overflows
       .empty_o    ( idx_fifo_empty    ),
       .usage_o    (  ),

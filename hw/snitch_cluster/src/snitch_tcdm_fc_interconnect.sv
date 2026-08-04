@@ -6,56 +6,65 @@
 // Author: Wolfgang Roenninger <wroennin@ethz.ch>
 
 `include "mem_interface/typedef.svh"
+`include "tcdm_interface/typedef.svh"
 
 /// Lightweight wrapper for a fixed response latency fully-connected (FC) interconnect,
 /// i.e. something that can be used to interconnect memories.
-module snitch_tcdm_fc_interconnect #(
-  /// Number of inputs into the interconnect (`> 0`).
+/*
+Module: snitch_tcdm_fc_interconnect
+Lightweight wrapper for a fixed response latency fully-connected (FC) interconnect,
+i.e. something that can be used to interconnect memories.
+
+Parameters:
+  NumInp                - Number of inputs into the interconnect (`> 0`).
+  NumOut                - Number of outputs from the interconnect (`> 0`).
+  Radix                 - Radix of the individual switch points of the network.
+  NumSwitchNets         - Number of parallel networks for switch-based interconnects.
+  SwitchLfsrArbiter     - Whether to use an LFSR to arbitrate switch-based networks.
+  DataWidth             - Size of the data payload on the interconnect.
+  UserWidth             - Width of the user field on the interconnect.
+  TcdmAddrWidth         - Address width on the request side.
+  MemAddrWidth          - Address width on the memory side.
+  MemoryResponseLatency - Latency of memory response (in cycles).
+  Topology              - Interconnect topology.
+  mem_req_t             - Type of the data request ports.
+  mem_rsp_t             - Type of the data response ports.
+
+Ports:
+  clk_i     - Clock, positive edge triggered.
+  rst_ni    - Reset, active low.
+  req_i     - Request ports.
+  rsp_o     - Response ports.
+  mem_req_o - Memory-side request ports.
+  mem_rsp_i - Memory-side response ports.
+*/
+module snitch_tcdm_fc_interconnect
+  import snitch_cluster_pkg::*;
+#(
   parameter int unsigned NumInp                = 32'd0,
-  /// Number of outputs from the interconnect (`> 0`).
   parameter int unsigned NumOut                = 32'd0,
-  /// Radix of the individual switch points of the network.
-  /// Currently supported are `32'd2` and `32'd4`.
   parameter int unsigned Radix                 = 32'd2,
-  /// Number of parallel networks for switch-based interconnects.
-  parameter int unsigned NumSwitchNets          = 32'd2,
-  /// Whether to use an LFSR to arbitrate switch-based networks.
-  parameter bit          SwitchLfsrArbiter      = 1'b0,
-  /// Payload type of the data request ports.
-  parameter type         tcdm_req_t            = logic,
-  /// Payload type of the data response ports.
-  parameter type         tcdm_rsp_t            = logic,
-  /// Payload type of the data request ports.
-  parameter type         mem_req_t             = logic,
-  /// Payload type of the data response ports.
-  parameter type         mem_rsp_t             = logic,
-  /// Address width on the request side.
-  parameter int unsigned TcdmAddrWidth         = 32,
-  /// Address width on the memory side. Must be smaller than the incoming
-  /// address width.
-  parameter int unsigned MemAddrWidth          = 32,
-  /// Data size of the interconnect. Only the data portion counts. The offsets
-  /// into the address are derived from this.
+  parameter int unsigned NumSwitchNets         = 32'd2,
+  parameter bit          SwitchLfsrArbiter     = 1'b0,
   parameter int unsigned DataWidth             = 32,
-  /// Additional user payload to route.
-  parameter type         user_t                = logic,
-  /// Latency of memory response (in cycles)
+  parameter int unsigned UserWidth             = 1,
+  parameter int unsigned TcdmAddrWidth         = 32,
+  parameter int unsigned MemAddrWidth          = 32,
   parameter int unsigned MemoryResponseLatency = 1,
-  parameter snitch_pkg::topo_e Topology        = snitch_pkg::LogarithmicInterconnect
+  parameter topo_e       Topology              = LogarithmicInterconnect,
+  parameter type         mem_req_t             = logic,
+  parameter type         mem_rsp_t             = logic,
+
+  // Derived parameters
+  localparam type        tcdm_req_t            = `TCDM_REQ_STRUCT(DataWidth, TcdmAddrWidth, UserWidth),
+  localparam type        tcdm_rsp_t            = `TCDM_RSP_STRUCT(DataWidth)
 ) (
-  /// Clock, positive edge triggered.
-  input  logic                             clk_i,
-  /// Reset, active low.
-  input  logic                             rst_ni,
-  /// Request port.
-  input  tcdm_req_t           [NumInp-1:0] req_i,
-  /// Resposne port.
-  output tcdm_rsp_t           [NumInp-1:0] rsp_o,
-  /// Memory Side
-  /// Request.
-  output mem_req_t            [NumOut-1:0] mem_req_o,
-  /// Response.
-  input  mem_rsp_t            [NumOut-1:0] mem_rsp_i
+  input  logic                   clk_i,
+  input  logic                   rst_ni,
+  input  tcdm_req_t [NumInp-1:0] req_i,
+  output tcdm_rsp_t [NumInp-1:0] rsp_o,
+  output mem_req_t  [NumOut-1:0] mem_req_o,
+  input  mem_rsp_t  [NumOut-1:0] mem_rsp_i
 );
 
   localparam int unsigned ByteOffset = $clog2(DataWidth/8);
@@ -63,16 +72,17 @@ module snitch_tcdm_fc_interconnect #(
   typedef logic [MemAddrWidth-1:0] addr_t;
   typedef logic [DataWidth-1:0] data_t;
   typedef logic [StrbWidth-1:0] strb_t;
+  typedef logic [UserWidth-1:0] user_t;
   `MEM_TYPEDEF_REQ_CHAN_T(mem_req_chan_t, addr_t, data_t, strb_t, user_t);
 
   // Do not assert unconditional stability on write data inside interconnects,
   // as write data may freely change on (non-atomic) reads. We properly assert
   // conditional write data stability below.
   localparam mem_req_chan_t MemReqAsrtMask =
-      '{data: '0, strb: '0, amo: reqrsp_pkg::amo_op_e'('1), default: '1};
+      '{data: '0, strb: '0, amo: snitch_pkg::amo_op_e'('1), default: '1};
 
   // Width of the bank select signal.
-  localparam int unsigned SelWidth = cf_math_pkg::idx_width(NumOut);
+  localparam int unsigned SelWidth = cc_pkg::idx_width(NumOut);
   typedef logic [SelWidth-1:0] select_t;
   select_t [NumInp-1:0] bank_select;
 
@@ -111,7 +121,7 @@ module snitch_tcdm_fc_interconnect #(
 
     // Write data must also be stable during AMOs, so include this case in assertions.
     logic in_req_alters_mem;
-    assign in_req_alters_mem = in_req[i].write | (in_req[i].amo != reqrsp_pkg::AMONone);
+    assign in_req_alters_mem = in_req[i].write | (in_req[i].amo != snitch_pkg::AMONone);
 
     // TODO: we could clean this up with an additional common_cells assertion macro.
     `ifndef VERILATOR
@@ -137,8 +147,8 @@ module snitch_tcdm_fc_interconnect #(
   // ------------
   // We need to arbitrate the requests coming from the input side and resolve
   // potential bank conflicts. Therefore a full arbitration tree is needed.
-  if (Topology == snitch_pkg::LogarithmicInterconnect) begin : gen_xbar
-    stream_xbar #(
+  if (Topology == LogarithmicInterconnect) begin : gen_xbar
+    cc_stream_xbar #(
       .NumInp      ( NumInp    ),
       .NumOut      ( NumOut    ),
       .payload_t   ( mem_req_chan_t ),
@@ -150,7 +160,8 @@ module snitch_tcdm_fc_interconnect #(
     ) i_stream_xbar (
       .clk_i,
       .rst_ni,
-      .flush_i ( 1'b0 ),
+      .clr_i     ( 1'b0 ),
+      .clr_arb_i ( 1'b0 ),
       .rr_i    ( '0 ),
       .data_i  ( in_req ),
       .sel_i   ( bank_select ),
@@ -161,22 +172,22 @@ module snitch_tcdm_fc_interconnect #(
       .valid_o ( mem_q_valid_flat ),
       .ready_i ( mem_q_ready_flat )
     );
-  end else if (Topology == snitch_pkg::OmegaNet) begin : gen_omega_net
-    localparam int unsigned NumInpPerNet = cf_math_pkg::ceil_div(NumInp, NumSwitchNets);
+  end else if (Topology == OmegaNet) begin : gen_omega_net
+    localparam int unsigned NumInpPerNet = cc_pkg::ceil_div(NumInp, NumSwitchNets);
 
     // Intermediate request signals for Omega-to-Xbar interface
     mem_req_chan_t  [NumSwitchNets-1:0][NumOut-1:0] oout_data;
     logic           [NumSwitchNets-1:0][NumOut-1:0] oout_valid, oout_ready;
 
     // Arbitration for Omega and Xbar stages, respectively
-    logic [cf_math_pkg::idx_width(NumOut)-1:0]        rr1;
-    logic [cf_math_pkg::idx_width(NumSwitchNets)-1:0]  rr2;
+    logic [cc_pkg::idx_width(NumOut)-1:0]        rr1;
+    logic [cc_pkg::idx_width(NumSwitchNets)-1:0]  rr2;
 
     // Use pseudorandom arbitration if desired. For reference, see:
     // https://github.com/pulp-platform/cluster_interconnect/blob/master/rtl/tcdm_interconnect/tcdm_interconnect.sv
     if (SwitchLfsrArbiter) begin : gen_omega_lsfr
-      logic [cf_math_pkg::idx_width(NumInp)-1:0] rr;
-      lfsr #(
+      logic [cc_pkg::idx_width(NumInp)-1:0] rr;
+      cc_lfsr #(
         .LfsrWidth    ( 64 ),
         .OutWidth     ( $clog2(NumInp) ),
         .CipherLayers ( 3 ),
@@ -184,6 +195,7 @@ module snitch_tcdm_fc_interconnect #(
       ) i_lfsr (
         .clk_i,
         .rst_ni,
+        .clr_i    ( 1'b0 ),
         .en_i     ( |(req_q_valid_flat & rsp_q_ready_flat) ),
         .out_o    ( rr )
       );
@@ -215,7 +227,7 @@ module snitch_tcdm_fc_interconnect #(
     for (genvar i = 0; i < NumSwitchNets; ++i) begin : gen_omega_nets
       data_t [NumOut-1:0] data_out;
       assign oout_data[i] = data_out;
-      stream_omega_net #(
+      cc_stream_omega_net #(
         .NumInp      ( NumInpPerNet ),
         .NumOut      ( NumOut ),
         .payload_t   ( data_t ),
@@ -228,7 +240,8 @@ module snitch_tcdm_fc_interconnect #(
       ) i_stream_omega_net (
         .clk_i,
         .rst_ni,
-        .flush_i ( 1'b0 ),
+        .clr_i     ( 1'b0 ),
+        .clr_arb_i ( 1'b0 ),
         // TODO: switch-level arbitration currently unconnected inside `stream_omega_net`
         .rr_i    ( /*rr1*/ '0 ),
         .sel_i   ( in_sel[i] ),
@@ -254,16 +267,16 @@ module snitch_tcdm_fc_interconnect #(
         assign oout_ready[k][i] = rrin_ready[k];
       end
 
-      rr_arb_tree #(
+      cc_rr_arb_tree #(
         .NumIn     ( NumSwitchNets ),
-        .DataType  ( mem_req_chan_t ),
+        .data_t    ( mem_req_chan_t ),
         .ExtPrio   ( SwitchLfsrArbiter ),
         .AxiVldRdy ( 1'b1 ),
         .LockIn    ( 1'b1 )
       ) i_rr_arb_tree (
         .clk_i,
         .rst_ni,
-        .flush_i ( 1'b0 ),
+        .clr_i   ( 1'b0 ),
         .rr_i    ( rr2 ),
         .data_i  ( rrin_data ),
         .req_i   ( rrin_valid ),
@@ -286,14 +299,15 @@ module snitch_tcdm_fc_interconnect #(
       bank_select: bank_select[i],
       valid: req_i[i].q_valid & rsp_o[i].q_ready
     };
-    // A this is a fixed latency interconnect a simple shift register is
+    // As this is a fixed latency interconnect a simple shift register is
     // sufficient to track the arbitration decisions.
-    shift_reg #(
-      .dtype ( rsp_t ),
-      .Depth ( MemoryResponseLatency )
+    cc_shift_register #(
+      .data_t ( rsp_t ),
+      .Depth  ( MemoryResponseLatency )
     ) i_shift_reg (
       .clk_i,
       .rst_ni,
+      .clr_i ( 1'b0 ),
       .d_i ( in_rsp_mux ),
       .d_o ( out_rsp_mux )
     );

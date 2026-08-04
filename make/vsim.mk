@@ -17,7 +17,7 @@ SN_VLIB        ?= $(SN_QUESTA_SEPP) vlib
 SN_VSIM_BUILDDIR ?= $(SN_TARGET_DIR)/sim/build/work-vsim
 
 # Flags
-SN_VSIM_BENDER_FLAGS = $(SN_COMMON_BENDER_FLAGS) $(SN_COMMON_BENDER_SIM_FLAGS) -t vsim
+SN_VSIM_BENDER_FLAGS = $(SN_COMMON_BENDER_SIM_FLAGS) -t vsim
 SN_VLOG_FLAGS += -64
 SN_VLOG_FLAGS += -svinputport=compat
 SN_VLOG_FLAGS += -override_timescale 1ns/1ps
@@ -53,9 +53,12 @@ SN_COMMON_BENDER_FLAGS += -t ihp13 -t netlist
 SN_COMMON_BENDER_FLAGS += -DSIMULATION
 endif
 
-# VCD_DUMP flag enables VCD dump generation
+# VCD_DUMP / SAIF_DUMP flags enable VCD or SAIF dump generation. Only
+# one should be set at a time; if both are set, VCD_DUMP has priority.
 ifeq ($(VCD_DUMP), 1)
 SN_VSIM_FLAGS += -do "source $(SN_ROOT)/nonfree/gf12/modelsim/vcd.tcl"
+else ifeq ($(SAIF_DUMP), 1)
+SN_VSIM_FLAGS += -do "source $(SN_ROOT)/nonfree/gf12/modelsim/saif.tcl"
 else
 SN_VSIM_FLAGS += -do "run -a"
 endif

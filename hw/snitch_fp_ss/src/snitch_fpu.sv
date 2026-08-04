@@ -19,14 +19,8 @@ module snitch_fpu import snitch_pkg::*; #(
   parameter bit          RegisterFpuRsp = 0,
   parameter type         TagType        = logic,
   // Derived parameters *do not override*
-  // TODO(colluca): this currently does not compile in Verilator (https://github.com/verilator/verilator/issues/6818)
-  // localparam type        fpu_req_t      = `FPU_REQ_STRUCT(FLEN, TagType),
-  // localparam type        fpu_rsp_t      = `FPU_RSP_STRUCT(FLEN, TagType)
-  // Workaround:
-  localparam type        fpu_req_chan_t = `FPU_REQ_CHAN_STRUCT(FLEN, TagType),
-  localparam type        fpu_req_t = `GENERIC_REQRSP_REQ_STRUCT(fpu_req_chan_t),
-  localparam type        fpu_rsp_chan_t = `FPU_RSP_CHAN_STRUCT(FLEN, TagType),
-  localparam type        fpu_rsp_t = `GENERIC_REQRSP_RSP_STRUCT(fpu_rsp_chan_t)
+  localparam type        fpu_req_t      = `FPU_REQ_STRUCT(FLEN, TagType),
+  localparam type        fpu_rsp_t      = `FPU_RSP_STRUCT(FLEN, TagType)
 ) (
   input  logic        clk_i,
   input  logic        rst_ni,
@@ -35,9 +29,8 @@ module snitch_fpu import snitch_pkg::*; #(
   output fpu_rsp_t    rsp_o
 );
 
-  // TODO(colluca): not needed with workaround in parameter port list
   // Define fpu_req_chan_t and fpu_rsp_chan_t
-  // `FPU_TYPEDEF_REQRSP_CHAN_ALL(fpu, FLEN, TagType)
+  `FPU_TYPEDEF_REQRSP_CHAN_ALL(fpu, FLEN, TagType)
 
   fpu_req_t fpu_req;
   fpu_rsp_t fpu_rsp;
@@ -61,8 +54,10 @@ module snitch_fpu import snitch_pkg::*; #(
     Width:         fpnew_pkg::maximum(FLEN, 32),
     EnableVectors: XFVEC,
     EnableNanBox:  1'b1,
-    FpFmtMask:     {RVF, RVD, XF16, XF8, XF16ALT, XF8ALT},
-    IntFmtMask:    {XFVEC && (XF8 || XF8ALT), XFVEC && (XF16 || XF16ALT), 1'b1, 1'b0}
+    FpFmtMask:     {RVF, RVD, XF16, XF8, XF16ALT, XF8ALT, 1'b0, 1'b0, 1'b0},
+    IntFmtMask:    {XFVEC && (XF8 || XF8ALT), XFVEC && (XF16 || XF16ALT), 1'b1, 1'b0},
+    MxFpFmtMask:   '0,
+    MxIntFmtMask:  '0
   };
 
   fpnew_top #(

@@ -40,7 +40,7 @@
 ///
 /// This module does not emit any bursts, but AXI5 capability is needed because
 /// of the atomic memory operations.
-module reqrsp_to_axi import reqrsp_pkg::*; #(
+module reqrsp_to_axi import reqrsp_pkg::*; import snitch_pkg::*; #(
   /// Number of same transactions which can be in-flight
   /// simulatnously. Must be greater than 1.
   parameter int unsigned MaxTrans = 4,
@@ -61,7 +61,7 @@ module reqrsp_to_axi import reqrsp_pkg::*; #(
   input  axi_rsp_t axi_rsp_i
 );
 
-  localparam int unsigned CounterWidth = cf_math_pkg::idx_width(MaxTrans);
+  localparam int unsigned CounterWidth = cc_pkg::idx_width(MaxTrans);
   typedef logic [CounterWidth-1:0] cnt_t;
   logic req_is_amo;
   logic is_write;
@@ -172,7 +172,7 @@ module reqrsp_to_axi import reqrsp_pkg::*; #(
   assign axi_req_o.ar.burst  = axi_pkg::BURST_INCR;
   assign axi_req_o.ar.lock   = (reqrsp_req_i.q.amo == AMOLR);
   assign axi_req_o.ar.cache  = axi_pkg::CACHE_MODIFIABLE;
-  assign axi_req_o.ar.id     = $unsigned(ID);
+  assign axi_req_o.ar.id     = ID;
   assign axi_req_o.ar.user   = reqrsp_req_i.q.user;
   assign axi_req_o.ar_valid  = q_valid_read;
   assign q_ready_read        = axi_rsp_i.ar_ready;
@@ -187,7 +187,7 @@ module reqrsp_to_axi import reqrsp_pkg::*; #(
   assign axi_req_o.aw.burst  = axi_pkg::BURST_INCR;
   assign axi_req_o.aw.lock   = (reqrsp_req_i.q.amo == AMOSC);
   assign axi_req_o.aw.cache  = axi_pkg::CACHE_MODIFIABLE;
-  assign axi_req_o.aw.id     = $unsigned(ID);
+  assign axi_req_o.aw.id     = ID;
   assign axi_req_o.aw.user   = reqrsp_req_i.q.user;
   assign axi_req_o.w.data    = write_data;
   assign axi_req_o.w.strb    = reqrsp_req_i.q.strb;
@@ -195,11 +195,12 @@ module reqrsp_to_axi import reqrsp_pkg::*; #(
   assign axi_req_o.w.user    = reqrsp_req_i.q.user;
 
   // Both channels need to handshake (independently).
-  stream_fork #(
-    .N_OUP (2)
+  cc_stream_fork #(
+    .NumOup (2)
   ) i_stream_fork (
     .clk_i,
     .rst_ni,
+    .clr_i   (1'b0),
     .valid_i (q_valid_write),
     .ready_o (q_ready_write),
     .valid_o ({axi_req_o.aw_valid, axi_req_o.w_valid}),
@@ -279,7 +280,7 @@ module reqrsp_to_axi import reqrsp_pkg::*; #(
   // Assertions:
   // Make sure that write is never set for AMOs.
   `ASSERT(AMOWriteEnable, reqrsp_req_i.q_valid &&
-    (reqrsp_req_i.q.amo != reqrsp_pkg::AMONone) |-> !reqrsp_req_i.q.write)
+    (reqrsp_req_i.q.amo != snitch_pkg::AMONone) |-> !reqrsp_req_i.q.write)
   // Check that the data width is in the range of 32 or 64 bit. We didn't define
   // any other bus widths so far.
   `ASSERT_INIT(check_DataWidth, DataWidth inside {32, 64})

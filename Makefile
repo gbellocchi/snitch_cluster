@@ -140,24 +140,7 @@ clean-rtl: sn-clean-rtl
 # Non-free #
 ############
 
-NONFREE_REMOTE ?= git@iis-git.ee.ethz.ch:pulp-restricted/snitch-cluster-nonfree.git
-NONFREE_COMMIT ?= 45ffdbd53f04cafbcd8369bbcaf04b3ee8a90b31
-NONFREE_DIR = $(SN_ROOT)/nonfree
-
-.PHONY: nonfree clean-nonfree
-
-nonfree:
-	cd $(NONFREE_DIR) && \
-	git init && \
-	git remote add origin $(NONFREE_REMOTE) && \
-	git fetch origin && \
-	git checkout $(NONFREE_COMMIT) -f
-
-clean-nonfree:
-	rm -rf $(NONFREE_DIR)
-	mkdir -p $(NONFREE_DIR)/util && touch $(NONFREE_DIR)/util/.gitignore
-
--include $(NONFREE_DIR)/Makefile
+-include nonfree/Makefile
 
 ############
 # Software #
@@ -230,11 +213,29 @@ include $(SN_ROOT)/make/vsim.mk
 include $(SN_ROOT)/make/verilator.mk
 include $(SN_ROOT)/make/vcs.mk
 
-############
+#############
 # Synthesis #
-############
+#############
 
 include $(SN_ROOT)/target/asic/yosys/yosys.mk
+
+#################
+# Spyglass lint #
+#################
+
+LINT_DIR = $(SN_ROOT)/util/lint
+LINT_BUILD_DIR = $(LINT_DIR)/build
+
+.PHONY: spyglass
+
+$(LINT_BUILD_DIR):
+	mkdir -p $@
+
+$(LINT_BUILD_DIR)/analyze.tcl: $(SN_BENDER_LOCK) $(SN_BENDER_YML) $(SN_GEN_RTL_SRCS) | $(LINT_BUILD_DIR)
+	$(SN_BENDER) script flist-plus $(SN_COMMON_BENDER_ASIC_FLAGS) -t ihp13 > $@
+
+spyglass: $(LINT_DIR)/spyglass.tcl $(LINT_BUILD_DIR)/analyze.tcl | $(LINT_BUILD_DIR)
+	cd $(LINT_BUILD_DIR) && $(SN_SG_SHELL) -tcl $<
 
 #########
 # GVSOC #

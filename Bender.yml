@@ -22,17 +22,28 @@ remotes:
   pulp: https://github.com/pulp-platform
 
 dependencies:
-  axi_riscv_atomics: 0.8.2
-  apb: 0.2.2
-  tech_cells_generic: 0.2.13
+  tech_cells_generic: 0.2.14
   riscv-dbg: 0.8.1
-  cluster_icache: 0.3.0
-  idma: 0.6.5
-  axi:                { git: https://github.com/colluca/axi.git,                      rev:      multicast   }
-  obi: 0.1.7
-  register_interface: 0.4.7
-  common_cells:       { git: https://github.com/pulp-platform/common_cells.git,       rev:      snitch      }
-  FPnew:              { git: https://github.com/pulp-platform/cvfpu.git,              rev:      pulp-v0.2.3 }
+  cluster_icache:
+    git: https://github.com/pulp-platform/cluster_icache.git
+    rev: common-cells-v2
+  axi_riscv_atomics:
+    git: https://github.com/pulp-platform/axi_riscv_atomics.git
+    rev: common-cells-v2
+  apb:
+    git: https://github.com/pulp-platform/apb.git
+    rev: common-cells-v2
+  idma:
+    git: https://github.com/pulp-platform/idma.git
+    rev: __deploy__9785d30__common-cells-v2
+    pass_targets: ["snitch_cluster"]
+  axi:
+    git: https://github.com/colluca/axi.git
+    rev: multicast
+  common_cells: 2.0.0-beta.2
+  FPnew:
+    git: https://github.com/pulp-platform/cvfpu.git
+    rev: common-cells-v2
 
 export_include_dirs:
   - hw/reqrsp_interface/include
@@ -44,64 +55,6 @@ export_include_dirs:
   - hw/snitch_ssr/include
 
 sources:
-  # reqrsp_interface
-  - files:
-      # Level 0
-      - hw/reqrsp_interface/src/generic_reqrsp_cut.sv
-      - hw/reqrsp_interface/src/generic_reqrsp_mux.sv
-      - hw/reqrsp_interface/src/reqrsp_pkg.sv
-      # Level 1
-      - hw/reqrsp_interface/src/reqrsp_intf.sv
-      # Level 2
-      - hw/reqrsp_interface/src/axi_to_reqrsp.sv
-      - hw/reqrsp_interface/src/reqrsp_cut.sv
-      - hw/reqrsp_interface/src/reqrsp_demux.sv
-      - hw/reqrsp_interface/src/reqrsp_iso.sv
-      - hw/reqrsp_interface/src/reqrsp_mux.sv
-      - hw/reqrsp_interface/src/reqrsp_to_axi.sv
-  - target: simulation
-    files:
-      - hw/reqrsp_interface/src/reqrsp_test.sv
-  - target: test
-    files:
-      - hw/reqrsp_interface/test/axi_to_reqrsp_tb.sv
-      - hw/reqrsp_interface/test/reqrsp_demux_tb.sv
-      - hw/reqrsp_interface/test/reqrsp_idempotent_tb.sv
-      - hw/reqrsp_interface/test/reqrsp_mux_tb.sv
-      - hw/reqrsp_interface/test/reqrsp_to_axi_tb.sv
-
-  # mem_interface
-  - files:
-      - hw/mem_interface/src/mem_wide_narrow_mux.sv
-      - hw/mem_interface/src/mem_interface.sv
-  - target: simulation
-    files:
-      - hw/mem_interface/src/mem_test.sv
-  - target: test
-    files:
-      - hw/mem_interface/test/mem_wide_narrow_mux_tb.sv
-
-  # tcdm_interface
-  - files:
-      # Level 0
-      - hw/tcdm_interface/src/tcdm_interface.sv
-      # Level 1
-      - hw/tcdm_interface/src/axi_to_tcdm.sv
-      - hw/tcdm_interface/src/obi_to_tcdm.sv
-      - hw/tcdm_interface/src/reqrsp_to_tcdm.sv
-      - hw/tcdm_interface/src/tcdm_mux.sv
-  - target: simulation
-    files:
-      - hw/tcdm_interface/src/tcdm_test.sv
-  - target: test
-    files:
-      - hw/tcdm_interface/test/reqrsp_to_tcdm_tb.sv
-      - hw/tcdm_interface/test/tcdm_mux_tb.sv
-
-  # dca_interface
-  - files:
-      - hw/dca_interface/src/dca_fork.sv
-
   # snitch
   - files:
       # Level 0
@@ -122,9 +75,68 @@ sources:
   - target: disable_pmcs
     files:
       - hw/snitch/src/snitch.sv
-  - target: test
+  - target: all(tb, not(verilator))
     files:
       - hw/snitch/test/snitch_l0_tlb_tb.sv
+
+  # reqrsp_interface
+  - files:
+      # Level 0
+      - hw/reqrsp_interface/src/generic_reqrsp_cut.sv
+      - hw/reqrsp_interface/src/generic_reqrsp_demux.sv
+      - hw/reqrsp_interface/src/generic_reqrsp_mux.sv
+      - hw/reqrsp_interface/src/reqrsp_pkg.sv
+      # Level 1
+      - hw/reqrsp_interface/src/reqrsp_intf.sv
+      # Level 2
+      - hw/reqrsp_interface/src/axi_to_reqrsp.sv
+      - hw/reqrsp_interface/src/reqrsp_cut.sv
+      - hw/reqrsp_interface/src/reqrsp_demux.sv
+      - hw/reqrsp_interface/src/reqrsp_iso.sv
+      - hw/reqrsp_interface/src/reqrsp_mux.sv
+      - hw/reqrsp_interface/src/reqrsp_to_axi.sv
+  - target: test
+    files:
+      - hw/reqrsp_interface/src/reqrsp_test.sv
+  - target: all(tb, not(verilator))
+    files:
+      - hw/reqrsp_interface/test/axi_to_reqrsp_tb.sv
+      - hw/reqrsp_interface/test/reqrsp_demux_tb.sv
+      - hw/reqrsp_interface/test/reqrsp_idempotent_tb.sv
+      - hw/reqrsp_interface/test/reqrsp_mux_tb.sv
+      - hw/reqrsp_interface/test/reqrsp_to_axi_tb.sv
+
+  # mem_interface
+  - files:
+      - hw/mem_interface/src/mem_wide_narrow_mux.sv
+      - hw/mem_interface/src/mem_interface.sv
+  - target: test
+    files:
+      - hw/mem_interface/src/mem_test.sv
+  - target: all(tb, not(verilator))
+    files:
+      - hw/mem_interface/test/mem_wide_narrow_mux_tb.sv
+
+  # tcdm_interface
+  - files:
+      # Level 0
+      - hw/tcdm_interface/src/tcdm_interface.sv
+      # Level 1
+      - hw/tcdm_interface/src/axi_to_tcdm.sv
+      - hw/tcdm_interface/src/obi_to_tcdm.sv
+      - hw/tcdm_interface/src/reqrsp_to_tcdm.sv
+      - hw/tcdm_interface/src/tcdm_mux.sv
+  - target: test
+    files:
+      - hw/tcdm_interface/src/tcdm_test.sv
+  - target: all(tb, not(verilator))
+    files:
+      - hw/tcdm_interface/test/reqrsp_to_tcdm_tb.sv
+      - hw/tcdm_interface/test/tcdm_mux_tb.sv
+
+  # dca_interface
+  - files:
+      - hw/dca_interface/src/dca_fork.sv
 
   # snitch_vm
   - files:
@@ -145,7 +157,7 @@ sources:
       - hw/snitch_ssr/src/snitch_ssr.sv
       # Level 4
       - hw/snitch_ssr/src/snitch_ssr_streamer.sv
-  - target: test
+  - target: all(tb, not(verilator))
     files:
       # Level 0
       - hw/snitch_ssr/test/fixture_ssr.sv
@@ -173,6 +185,7 @@ sources:
   # snitch_cluster
   - files:
       # Level 0
+      - hw/snitch_cluster/src/snitch_cluster_pkg.sv
       - hw/snitch_cluster/src/snitch_amo_shim.sv
       - hw/snitch_cluster/src/snitch_cluster_peripheral/snitch_cluster_peripheral_reg_pkg.sv
       - hw/snitch_cluster/src/snitch_cluster_peripheral/snitch_cluster_peripheral_reg.sv
@@ -189,32 +202,25 @@ sources:
       - hw/snitch_cluster/src/snitch_hive.sv
       # Level 4
       - hw/snitch_cluster/src/snitch_cluster.sv
-  - target: test
+  - target: all(tb, not(verilator))
     files:
       - hw/snitch_cluster/test/snitch_tcdm_interconnect_tb.sv
 
-  # target/common
-  - target: any(simulation, verilator)
+  # To be overridden by the top-level package using Bender's `override_files`.
+  - target:
     files:
-      - target/sim/tb/tb_memory_axi.sv
-  - target: test
-    files:
-      - target/sim/tb/tb_bin.sv
+      - hw/generated/snitch_cluster_wrapper_pkg.sv
 
-  # target/snitch_cluster
-  - target: snitch_cluster_wrapper
+  - target: not(netlist)
     files:
-      - hw/generated/snitch_cluster_pkg.sv
-  - target: all(snitch_cluster_wrapper, not(netlist))
-    files:
-      - hw/generated/snitch_cluster_wrapper.sv
-  - target: all(snitch_cluster_wrapper, gf12, netlist)
-    files:
-      - nonfree/gf12/fusion/runs/0/out/15/snitch_cluster_wrapper.v
-  - target: all(snitch_cluster_wrapper, any(simulation, verilator))
+      - hw/snitch_cluster/src/snitch_cluster_wrapper.sv
+
+  - target: tb
     include_dirs:
       - hw/generated
     files:
+      - target/sim/tb/tb_memory_axi.sv
+      - target/sim/tb/tb_bin.sv
       - target/sim/tb/vip_snitch_cluster.sv
       - target/sim/tb/testharness.sv
 
@@ -222,6 +228,10 @@ sources:
     files:
       - nonfree/gf12/mems/tc_sram.sv
       - nonfree/gf12/sourcecode/tc_clk.sv
+
+  - target: all(gf12, netlist)
+    files:
+      - nonfree/gf12/fusion/runs/0/out/15/snitch_cluster_wrapper.v
 
   - target: ihp13
     files:
@@ -244,6 +254,6 @@ sources:
       - target/asic/ihp13/tc_sram_impl.sv
       - target/asic/ihp13/tc_clk.sv
 
-  - target: all(snitch_cluster_wrapper, ihp13, netlist)
+  - target: all(ihp13, netlist)
     files:
       - target/asic/yosys/out/snitch_cluster_wrapper_yosys_debug.v

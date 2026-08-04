@@ -9,7 +9,7 @@ module tcdm_mux #(
   parameter int unsigned NrPorts = 2,
   parameter int unsigned AddrWidth = 0,
   parameter int unsigned DataWidth = 0,
-  parameter type user_t = logic,
+  parameter int unsigned UserWidth = 0,
   parameter int unsigned RespDepth = 8,
   parameter type tcdm_req_t = logic,
   parameter type tcdm_rsp_t = logic
@@ -22,14 +22,10 @@ module tcdm_mux #(
   input  tcdm_rsp_t               mst_rsp_i
 );
 
-  localparam int unsigned SelectWidth = cf_math_pkg::idx_width(NrPorts);
+  localparam int unsigned SelectWidth = cc_pkg::idx_width(NrPorts);
   typedef logic [SelectWidth-1:0] select_t;
 
-  typedef logic [AddrWidth-1:0] addr_t;
-  typedef logic [DataWidth-1:0] data_t;
-  typedef logic [DataWidth/8-1:0] strb_t;
-
-  `TCDM_TYPEDEF_REQ_CHAN_T(tcdm_req_chan_t, addr_t, data_t, strb_t, user_t)
+  `TCDM_TYPEDEF_REQ_CHAN_T(tcdm_req_chan_t, DataWidth, AddrWidth, UserWidth)
 
   if (NrPorts > 1) begin : gen_mux
     logic [NrPorts-1:0] slv_req_valid, slv_req_ready;
@@ -48,15 +44,15 @@ module tcdm_mux #(
     end
 
     /// Arbitrate on instruction request port
-    rr_arb_tree #(
+    cc_rr_arb_tree #(
       .NumIn (NrPorts),
-      .DataType (tcdm_req_chan_t),
+      .data_t (tcdm_req_chan_t),
       .AxiVldRdy (1'b1),
       .LockIn (1'b1)
     ) i_q_mux (
       .clk_i (clk_i),
       .rst_ni (rst_ni),
-      .flush_i (1'b0),
+      .clr_i (1'b0),
       .rr_i  ('0),
       .req_i (slv_req_valid),
       .gnt_o (slv_req_ready),
@@ -67,26 +63,27 @@ module tcdm_mux #(
       .idx_o (fifo_in_select)
     );
 
-    stream_fork #(
-      .N_OUP (2)
+    cc_stream_fork #(
+      .NumOup (2)
     ) i_stream_fork (
       .clk_i (clk_i),
       .rst_ni (rst_ni),
+      .clr_i (1'b0),
       .valid_i (rr_valid),
       .ready_o (rr_ready),
       .valid_o ({fifo_valid, mst_req_o.q_valid}),
       .ready_i ({fifo_ready, mst_rsp_i.q_ready})
     );
 
-    stream_fifo #(
-      .FALL_THROUGH (1'b0),
-      .DEPTH (RespDepth),
-      .T (select_t)
+    cc_stream_fifo #(
+      .FallThrough (1'b0),
+      .Depth (RespDepth),
+      .data_t (select_t)
     ) i_stream_fifo (
       .clk_i,
       .rst_ni,
+      .clr_i (1'b0),
       .flush_i (1'b0),
-      .testmode_i (1'b0),
       .usage_o (),
       .data_i (fifo_in_select),
       .valid_i (fifo_valid),
@@ -110,7 +107,7 @@ module tcdm_mux_intf #(
   parameter int unsigned NrPorts = 2,
   parameter int unsigned AddrWidth = 0,
   parameter int unsigned DataWidth = 0,
-  parameter type         user_t    = logic,
+  parameter int unsigned UserWidth = 0,
   parameter int unsigned RespDepth = 8
 ) (
   input  logic                    clk_i,
@@ -119,11 +116,7 @@ module tcdm_mux_intf #(
   TCDM_BUS                        mst
 );
 
-  typedef logic [AddrWidth-1:0] addr_t;
-  typedef logic [DataWidth-1:0] data_t;
-  typedef logic [DataWidth/8-1:0] strb_t;
-
-  `TCDM_TYPEDEF_ALL(tcdm, addr_t, data_t, strb_t, user_t)
+  `TCDM_TYPEDEF_ALL(tcdm, DataWidth, AddrWidth, UserWidth)
 
   tcdm_req_t [NrPorts-1:0] tcdm_slv_req;
   tcdm_rsp_t [NrPorts-1:0] tcdm_slv_rsp;
@@ -135,8 +128,7 @@ module tcdm_mux_intf #(
     .NrPorts (NrPorts),
     .AddrWidth (AddrWidth),
     .DataWidth (DataWidth),
-    .user_t (user_t),
-    // TODO(zarubaf): Make parameter
+    .UserWidth (UserWidth),
     .RespDepth (RespDepth),
     .tcdm_req_t (tcdm_req_t),
     .tcdm_rsp_t (tcdm_rsp_t)

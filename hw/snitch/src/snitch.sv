@@ -3,162 +3,188 @@
 // SPDX-License-Identifier: SHL-0.51
 
 // Author: Florian Zaruba <zarubaf@iis.ee.ethz.ch>
-// Description: Top-Level of Snitch Integer Core RV32E
+// Author: Luca Colagrande <colluca@iis.ee.ethz.ch>
 
 `include "common_cells/registers.svh"
 `include "common_cells/assertions.svh"
+`include "cv_x_if/typedef.svh"
+`include "snitch/typedef.svh"
 
 // `SNITCH_ENABLE_PERF Enables mcycle, minstret performance counters (read only)
 
+/*
+Module: snitch
+Top-level Snitch core.
+
+Parameters:
+  BootAddr               - Boot address of the core.
+  IsaCfg                 - ISA configuration of the core.
+  AddrWidth              - Physical Address width of the core.
+  DataWidth              - Data width of memory interface.
+  VMSupport              - Enable virtual memory support.
+  DebugSupport           - Enable debug support.
+  EnableXif              - Enable CV-X-IF support.
+  XifIdWidth             - ID width of the CV-X-IF interface.
+  NumIntOutstandingLoads - Number of outstanding loads.
+  NumIntOutstandingMem   - Number of outstanding memory transactions.
+  NumDTLBEntries         - Number of DTLB entries.
+  NumITLBEntries         - Number of ITLB entries.
+  SnitchPMACfg           - Physical Memory Attributes (PMA) configuration.
+  CaqDepth               - Consistency Address Queue (CAQ) depth.
+  CaqTagWidth            - CAQ tag width.
+
+Ports:
+  clk_i              - Clock.
+  rst_i              - Active high reset.
+  hart_id_i          - Hart ID.
+  irq_i              - Interrupt lines.
+  flush_i_valid_o    - Instruction cache flush request.
+  flush_i_ready_i    - Flush has completed when the signal goes to `1` (tie to `1` if unused).
+  inst_req_o         - Instruction refill port (outgoing).
+  inst_rsp_i         - Instruction refill port (incoming).
+  acc_req_o          - Accelerator interface (outgoing). Same IDs need to be handled in order.
+  acc_rsp_i          - Accelerator interface (incoming). Same IDs need to be handled in order.
+  x_issue_req_o      - CV-X-IF issue request packet.
+  x_issue_resp_i     - CV-X-IF issue response packet.
+  x_issue_valid_o    - CV-X-IF issue request valid.
+  x_issue_ready_i    - CV-X-IF issue request ready.
+  x_register_o       - CV-X-IF register packet.
+  x_register_valid_o - CV-X-IF register request valid.
+  x_register_ready_i - CV-X-IF register request ready.
+  x_commit_o         - CV-X-IF commit packet.
+  x_commit_valid_o   - CV-X-IF commit request valid.
+  x_result_i         - CV-X-IF result packet.
+  x_result_valid_i   - CV-X-IF result request valid.
+  x_result_ready_o   - CV-X-IF result request ready.
+  i2f_rdata_o        - Integer-to-FPSS (I2F) packet.
+  i2f_rvalid_o       - I2F valid.
+  i2f_rready_i       - I2F ready.
+  f2i_wdata_i        - FPSS-to-integer (F2I) packet.
+  f2i_wvalid_i       - F2I valid.
+  f2i_wready_o       - F2I ready.
+  data_req_o         - Data interface (outgoing). Transactions need to be handled strictly in-order.
+  data_rsp_i         - Data interface (incoming). Transactions need to be handled strictly in-order.
+  ptw_req_o          - Address translation interface (outgoing).
+  ptw_rsp_i          - Address translation interface (incoming).
+  fpu_rnd_mode_o     - FPU control interface, rounding mode.
+  fpu_fmt_mode_o     - FPU control interface, format mode.
+  fpu_status_i       - FPU status interface.
+  caq_pvalid_i       - Used by FPU to notify Snitch LSU of retired loads/stores.
+  core_events_o      - Core events for performance counters.
+  en_copift_o        - Enable COPIFT queues (I2F, F2I) in FPSS.
+  barrier_o          - Signals core's arrival on a cluster hardware barrier.
+  barrier_i          - Signals to the core that it can depart from a cluster hardware barrier.
+*/
 module snitch import snitch_pkg::*; import riscv_instr::*; #(
-  /// Boot address of core.
-  parameter logic [31:0] BootAddr  = 32'h0000_1000,
-  /// Physical Address width of the core.
+  parameter logic [31:0] BootAddr = 32'h0000_1000,
+  parameter isa_cfg_t    IsaCfg = '0,
   parameter int unsigned AddrWidth = 48,
-  /// Data width of memory interface.
   parameter int unsigned DataWidth = 64,
-  /// Reduced-register extension.
-  parameter bit          RVE       = 0,
-  /// Enable Snitch DMA as accelerator.
-  parameter bit          Xdma      = 0,
-  parameter bit          Xssr      = 0,
-  parameter bit          Xcopift   = 0,
-  /// Enable FP in general
-  parameter bit          FP_EN     = 1,
-  /// Enable F Extension.
-  parameter bit          RVF       = 0,
-  /// Enable D Extension.
-  parameter bit          RVD       = 0,
-  parameter bit          XF16      = 0,
-  parameter bit          XF16ALT   = 0,
-  parameter bit          XF8       = 0,
-  parameter bit          XF8ALT    = 0,
-  /// Enable div/sqrt unit (buggy - use with caution)
-  parameter bit          XDivSqrt  = 0,
-  parameter bit          XFVEC     = 0,
-  parameter bit          XFDOTP    = 0,
-  parameter bit          XFAUX     = 0,
-  int unsigned           FLEN      = DataWidth,
-  /// Enable virtual memory support.
   parameter bit          VMSupport = 1,
-  /// Enable Xpulp instructions
-  parameter bit          Xpulppostmod = 0,  // overlaps witch DMA, SSR, copift and frep
-  parameter bit          Xpulpabs     = 0,
-  parameter bit          Xpulpbitop   = 0,
-  parameter bit          Xpulpbr      = 0,
-  parameter bit          Xpulpclip    = 0,
-  parameter bit          Xpulpmacsi   = 0,
-  parameter bit          Xpulpminmax  = 0,
-  parameter bit          Xpulpslet    = 0,
-  parameter bit          Xpulpvect    = 0,
-  parameter bit          Xpulpvectshufflepack = 0,
-  parameter bit          Xpulpv2     = 0,
-  /// Data port request type.
-  parameter type         dreq_t    = logic,
-  /// Data port response type.
-  parameter type         drsp_t     = logic,
-  parameter type         acc_req_t  = logic,
-  parameter type         acc_resp_t = logic,
-  parameter type         pa_t       = logic,
-  parameter type         l0_pte_t   = logic,
-  // XIF parameters
+  parameter bit          DebugSupport = 1,
   parameter bit          EnableXif  = 1,
   parameter int unsigned XifIdWidth = 4,
-  // XIF port types
-  parameter type         x_issue_req_t  = logic,
-  parameter type         x_issue_resp_t = logic,
-  parameter type         x_register_t   = logic,
-  parameter type         x_commit_t     = logic,
-  parameter type         x_result_t     = logic,
   parameter int unsigned NumIntOutstandingLoads = 0,
   parameter int unsigned NumIntOutstandingMem = 0,
   parameter int unsigned NumDTLBEntries = 0,
   parameter int unsigned NumITLBEntries = 0,
   parameter snitch_pma_pkg::snitch_pma_t SnitchPMACfg = '{default: 0},
-  /// Consistency Address Queue (CAQ) parameters
   parameter int unsigned CaqDepth    = 0,
   parameter int unsigned CaqTagWidth = 0,
-  /// Enable debug support.
-  parameter bit         DebugSupport = 1,
-  /// Derived parameter *Do not override*
-  parameter type addr_t = logic [AddrWidth-1:0],
-  parameter type data_t = logic [DataWidth-1:0]
+
+  // Derived parameters
+  localparam type ireq_t         = `SNITCH_INSTR_REQ_STRUCT(AddrWidth),
+  localparam type irsp_t         = `SNITCH_INSTR_RSP_STRUCT,
+  localparam type acc_req_t      = `SNITCH_ACC_REQ_STRUCT(DataWidth, AddrWidth),
+  localparam type acc_rsp_t      = `SNITCH_ACC_RSP_STRUCT(DataWidth),
+  localparam type x_issue_req_t  = `CV_X_IF_ISSUE_REQ_STRUCT(XifIdWidth),
+  localparam type x_issue_resp_t = `CV_X_IF_ISSUE_RESP_STRUCT,
+  localparam type x_register_t   = `CV_X_IF_REGISTER_STRUCT(XifIdWidth),
+  localparam type x_commit_t     = `CV_X_IF_COMMIT_STRUCT(XifIdWidth),
+  localparam type x_result_t     = `CV_X_IF_RESULT_STRUCT(XifIdWidth),
+  localparam type dreq_t         = `SNITCH_DATA_REQ_STRUCT(DataWidth, AddrWidth),
+  localparam type drsp_t         = `SNITCH_DATA_RSP_STRUCT(DataWidth),
+  localparam type ptw_req_t      = `SNITCH_PTW_REQ_STRUCT(AddrWidth),
+  localparam type ptw_rsp_t      = `SNITCH_PTW_RSP_STRUCT(AddrWidth)
 ) (
-  input  logic          clk_i,
-  input  logic          rst_i,
-  input  logic [31:0]   hart_id_i,
-  /// Interrupts
-  input  interrupts_t   irq_i,
-  /// Instruction cache flush request
-  output logic          flush_i_valid_o,
-  /// Flush has completed when the signal goes to `1`.
-  /// Tie to `1` if unused
-  input  logic          flush_i_ready_i,
-  // Instruction Refill Port
-  output addr_t         inst_addr_o,
-  output logic          inst_cacheable_o,
-  input  logic [31:0]   inst_data_i,
-  output logic          inst_valid_o,
-  input  logic          inst_ready_i,
-  /// Accelerator Interface - Master Port
-  /// Independent channels for transaction request and read completion.
-  /// AXI-like handshaking.
-  /// Same IDs need to be handled in-order.
-  output acc_req_t      acc_qreq_o,
-  output logic          acc_qvalid_o,
-  input  logic          acc_qready_i,
-  input  acc_resp_t     acc_prsp_i,
-  input  logic          acc_pvalid_i,
-  output logic          acc_pready_o,
-  // X Interface - Issue ports
-  output x_issue_req_t  x_issue_req_o,
-  input  x_issue_resp_t x_issue_resp_i,
-  output logic          x_issue_valid_o,
-  input  logic          x_issue_ready_i,
-  output x_register_t   x_register_o,
-  output logic          x_register_valid_o,
-  input  logic          x_register_ready_i,
-  output x_commit_t     x_commit_o,
-  output logic          x_commit_valid_o,
-  // X Interface - Result ports
-  input  x_result_t     x_result_i,
-  input  logic          x_result_valid_i,
-  output logic          x_result_ready_o,
-  // i2f queue interface
-  output logic [31:0]   i2f_rdata_o,
-  output logic          i2f_rvalid_o,
-  input  logic          i2f_rready_i,
-  // f2i queue interface
-  input  logic [31:0]   f2i_wdata_i,
-  input  logic          f2i_wvalid_i,
-  output logic          f2i_wready_o,
-  /// TCDM Data Interface
-  /// Write transactions do not return data on the `P Channel`
-  /// Transactions need to be handled strictly in-order.
-  output dreq_t         data_req_o,
-  input  drsp_t         data_rsp_i,
-  // Address Translation interface.
-  output logic    [1:0] ptw_valid_o,
-  input  logic    [1:0] ptw_ready_i,
-  output va_t     [1:0] ptw_va_o,
-  output pa_t     [1:0] ptw_ppn_o,
-  input  l0_pte_t [1:0] ptw_pte_i,
-  input  logic    [1:0] ptw_is_4mega_i,
-  // FPU **un-timed** Side-channel
-  output fpnew_pkg::roundmode_e     fpu_rnd_mode_o,
-  output fpnew_pkg::fmt_mode_t      fpu_fmt_mode_o,
-  input  fpnew_pkg::status_t        fpu_status_i,
-  /// Consistency Address Queue (CAQ) interface.
-  /// Used by FPU to notify Snitch LSU of retired loads/stores.
-  input  logic          caq_pvalid_i,
-  // Core events for performance counters
-  output snitch_pkg::core_events_t  core_events_o,
-  // FP Queue CSR
-  output logic          en_copift_o,
-  // Cluster HW barrier
-  output logic          barrier_o,
-  input  logic          barrier_i
+  input  logic                  clk_i,
+  input  logic                  rst_i,
+  input  logic [31:0]           hart_id_i,
+  input  interrupts_t           irq_i,
+  output logic                  flush_i_valid_o,
+  input  logic                  flush_i_ready_i,
+  output ireq_t                 inst_req_o,
+  input  irsp_t                 inst_rsp_i,
+  output acc_req_t              acc_req_o,
+  input  acc_rsp_t              acc_rsp_i,
+  output x_issue_req_t          x_issue_req_o,
+  input  x_issue_resp_t         x_issue_resp_i,
+  output logic                  x_issue_valid_o,
+  input  logic                  x_issue_ready_i,
+  output x_register_t           x_register_o,
+  output logic                  x_register_valid_o,
+  input  logic                  x_register_ready_i,
+  output x_commit_t             x_commit_o,
+  output logic                  x_commit_valid_o,
+  input  x_result_t             x_result_i,
+  input  logic                  x_result_valid_i,
+  output logic                  x_result_ready_o,
+  output logic [31:0]           i2f_rdata_o,
+  output logic                  i2f_rvalid_o,
+  input  logic                  i2f_rready_i,
+  input  logic [31:0]           f2i_wdata_i,
+  input  logic                  f2i_wvalid_i,
+  output logic                  f2i_wready_o,
+  output dreq_t                 data_req_o,
+  input  drsp_t                 data_rsp_i,
+  output ptw_req_t [1:0]        ptw_req_o,
+  input  ptw_rsp_t [1:0]        ptw_rsp_i,
+  output fpnew_pkg::roundmode_e fpu_rnd_mode_o,
+  output fpnew_pkg::fmt_mode_t  fpu_fmt_mode_o,
+  input  fpnew_pkg::status_t    fpu_status_i,
+  input  logic                  caq_pvalid_i,
+  output core_events_t          core_events_o,
+  output logic                  en_copift_o,
+  output logic                  barrier_o,
+  input  logic                  barrier_i
 );
+
+  // Unpack ISA config
+  localparam bit RVE                  = IsaCfg.RVE;
+  localparam bit Xdma                 = IsaCfg.Xdma;
+  localparam bit Xssr                 = IsaCfg.Xssr;
+  localparam bit Xfrep                = IsaCfg.Xfrep;
+  localparam bit Xcopift              = IsaCfg.Xcopift;
+  localparam bit RVF                  = IsaCfg.RVF;
+  localparam bit RVD                  = IsaCfg.RVD;
+  localparam bit XF16                 = IsaCfg.XF16;
+  localparam bit XF16ALT              = IsaCfg.XF16ALT;
+  localparam bit XF8                  = IsaCfg.XF8;
+  localparam bit XF8ALT               = IsaCfg.XF8ALT;
+  localparam bit XDivSqrt             = IsaCfg.XDivSqrt;
+  localparam bit XFVEC                = IsaCfg.XFVEC;
+  localparam bit XFDOTP               = IsaCfg.XFDOTP;
+  localparam bit XFAUX                = IsaCfg.XFAUX;
+  localparam bit Xcvmem               = IsaCfg.Xcvmem;
+  localparam bit Xpulpabs             = IsaCfg.Xpulpabs;
+  localparam bit Xpulpbitop           = IsaCfg.Xpulpbitop;
+  localparam bit Xpulpbr              = IsaCfg.Xpulpbr;
+  localparam bit Xpulpclip            = IsaCfg.Xpulpclip;
+  localparam bit Xpulpmacsi           = IsaCfg.Xpulpmacsi;
+  localparam bit Xpulpminmax          = IsaCfg.Xpulpminmax;
+  localparam bit Xpulpslet            = IsaCfg.Xpulpslet;
+  localparam bit Xpulpvect            = IsaCfg.Xpulpvect;
+  localparam bit Xpulpvectshufflepack = IsaCfg.Xpulpvectshufflepack;
+
+  typedef logic [DataWidth-1:0] data_t;
+  typedef logic [AddrWidth-1:0] addr_t;
+
+  `SNITCH_TYPEDEF_PA_T(AddrWidth)
+  `SNITCH_TYPEDEF_L0_PTE_T(AddrWidth)
+
+  localparam int unsigned FLEN  = calculate_flen(IsaCfg);
+  localparam bit          FP_EN = calculate_fp_enable(IsaCfg);
+
   // Debug module's base address
   localparam logic [31:0] DmBaseAddress = 0;
   localparam int RegWidth = RVE ? 4 : 5;
@@ -167,9 +193,14 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   localparam bit NSX = XF16 | XF16ALT | XF8 | XFVEC;
 
   // Number of read ports
-  localparam int unsigned NumRfReadPorts = EnableXif | Xpulppostmod ? 3 : 2;
+  localparam int unsigned NumRfReadPorts = EnableXif | Xcvmem ? 3 : 2;
 
-  logic illegal_inst, illegal_csr;
+  logic illegal_csr;
+  // Non-native instruction, unsupported by Snitch and ACC coprocessors, but possibly
+  // supported by CV-X-IF coprocessors.
+  logic unsupported_inst;
+  // Illegal instruction, unsupported by Snitch, ACC and CV-X-IF coprocessors.
+  logic illegal_inst;
   logic interrupt, ecall, ebreak;
   logic zero_lsb;
 
@@ -185,14 +216,14 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // Immediates
   logic [31:0] iimm, uimm, jimm, bimm, simm, pbimm;
   /* verilator lint_off WIDTH */
-  assign iimm = $signed({inst_data_i[31:20]});
-  assign uimm = {inst_data_i[31:12], 12'b0};
-  assign jimm = $signed({inst_data_i[31],
-                                  inst_data_i[19:12], inst_data_i[20], inst_data_i[30:21], 1'b0});
-  assign bimm = $signed({inst_data_i[31],
-                                    inst_data_i[7], inst_data_i[30:25], inst_data_i[11:8], 1'b0});
-  assign simm = $signed({inst_data_i[31:25], inst_data_i[11:7]});
-  assign pbimm = $signed(inst_data_i[24:20]); // Xpulpv2 immediate branching signed immediate
+  assign iimm = $signed({inst_rsp_i.data[31:20]});
+  assign uimm = {inst_rsp_i.data[31:12], 12'b0};
+  assign jimm = $signed({inst_rsp_i.data[31],
+                         inst_rsp_i.data[19:12], inst_rsp_i.data[20], inst_rsp_i.data[30:21], 1'b0});
+  assign bimm = $signed({inst_rsp_i.data[31],
+                         inst_rsp_i.data[7], inst_rsp_i.data[30:25], inst_rsp_i.data[11:8], 1'b0});
+  assign simm = $signed({inst_rsp_i.data[31:25], inst_rsp_i.data[11:7]});
+  assign pbimm = $signed(inst_rsp_i.data[24:20]); // Xpulpv2 immediate branching signed immediate
   /* verilator lint_on WIDTH */
 
   logic [31:0] opa, opb, opc;
@@ -261,7 +292,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   } ls_size_e;
   ls_size_e ls_size;
 
-  reqrsp_pkg::amo_op_e ls_amo;
+  amo_op_e ls_amo;
 
   data_t ld_result;
   logic  lsu_qready, lsu_qvalid;
@@ -443,12 +474,12 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // register int destination in scoreboard
   logic  acc_register_rd;
 
-  assign acc_qreq_o.id = rd;
-  assign acc_qreq_o.data_op = inst_data_i;
-  assign acc_qreq_o.data_arga = {{32{opa[31]}}, opa};
-  assign acc_qreq_o.data_argb = {{32{opb[31]}}, opb};
+  assign acc_req_o.q.id = rd;
+  assign acc_req_o.q.data_op = inst_rsp_i.data;
+  assign acc_req_o.q.data_arga = {{32{opa[31]}}, opa};
+  assign acc_req_o.q.data_argb = {{32{opb[31]}}, opb};
   // operand C is used for load/store instructions or for multiply-accumulate function
-  assign acc_qreq_o.data_argc = (acc_qreq_o.addr == IPU) ? {{32{opc[31]}}, opc} : ls_paddr;
+  assign acc_req_o.q.data_argc = (acc_req_o.q.addr == IPU) ? {{32{opc[31]}}, opc} : ls_paddr;
 
   // XIF ID counter
   logic [XifIdWidth-1:0] xif_offload_counter_q;
@@ -478,11 +509,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       .page_fault_o ( itlb_page_fault ),
       .pa_o ( itlb_pa ),
       // Refill port
-      .valid_o ( ptw_valid_o[0] ),
-      .ready_i ( ptw_ready_i[0] ),
-      .va_o ( ptw_va_o[0] ),
-      .pte_i ( ptw_pte_i[0] ),
-      .is_4mega_i ( ptw_is_4mega_i[0] )
+      .valid_o ( ptw_req_o[0].valid ),
+      .ready_i ( ptw_rsp_i[0].ready ),
+      .va_o ( ptw_req_o[0].va ),
+      .pte_i ( ptw_rsp_i[0].pte ),
+      .is_4mega_i ( ptw_rsp_i[0].is_4mega )
     );
   end else begin : gen_no_itlb
     // Tie off core-side interface (itlb_pa unused as trans_active == '0)
@@ -490,11 +521,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     assign itlb_ready       = 1'b0;
     assign itlb_page_fault  = 1'b0;
     // Tie off TLB refill request
-    assign ptw_valid_o[0] = 1'b0;
-    assign ptw_va_o[0]    = '0;
+    assign ptw_req_o[0].valid = 1'b0;
+    assign ptw_req_o[0].va    = '0;
   end
 
-  assign itlb_valid = trans_active & inst_valid_o;
+  assign itlb_valid = trans_active & inst_req_o.q_valid;
   assign itlb_trans_valid = trans_active & itlb_valid & itlb_ready;
 
   // ---------------------------
@@ -502,12 +533,12 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // ---------------------------
   // TODO(paulsc) Add CSR-based segmentation solution for case without VM without sudden jump.
   // Mulitplexer using and/or as this signal is likely timing critical.
-  assign inst_addr_o[PPNSize+PageShift-1:PageShift] =
+  assign inst_req_o.addr[PPNSize+PageShift-1:PageShift] =
       ({(PPNSize){trans_active}} & itlb_pa)
     | (~{(PPNSize){trans_active}} & {{{AddrWidth-32}{1'b0}}, pc_q[31:PageShift]});
-  assign inst_addr_o[PageShift-1:0] = pc_q[PageShift-1:0];
-  assign inst_cacheable_o = snitch_pma_pkg::is_inside_cacheable_regions(SnitchPMACfg, inst_addr_o);
-  assign inst_valid_o = ~wfi_q && ~csr_stall_q;
+  assign inst_req_o.addr[PageShift-1:0] = pc_q[PageShift-1:0];
+  assign inst_req_o.cacheable = snitch_pma_pkg::is_inside_cacheable_regions(SnitchPMACfg, inst_req_o.addr);
+  assign inst_req_o.q_valid = ~wfi_q && ~csr_stall_q;
 
   // --------------------
   // Control
@@ -527,7 +558,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     if ((is_load |
         (acc_register_rd & ~(en_copift_o & is_fp_inst)) |
         (x_issue_hs & x_issue_resp_i.writeback)) && !stall && !exception) sb_d[rd] = 1'b1;
-    if (retire_acc) sb_d[acc_prsp_i.id[RegWidth-1:0]] = 1'b0;
+    if (retire_acc) sb_d[acc_rsp_i.p.id[RegWidth-1:0]] = 1'b0;
     if (EnableXif & retire_x) sb_d[x_result_i.rd] = 1'b0;
     sb_d[0] = 1'b0;
   end
@@ -540,19 +571,19 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   assign operands_ready = opa_ready & opb_ready & opc_ready;
   // Either we are not using the destination register or we need to make
   // sure that its destination operand is not marked busy in the scoreboard (to prevent WAW violations).
-  // Similarly, some instructions (e.g. in Xpulppostmod) also write rs1.
+  // Similarly, some instructions (e.g. in Xcvmem) also write rs1.
   assign dst_ready = (uses_rd ? (rd_is_i2f ? i2f_wready : ~sb_q[rd]) : 1'b1) &&
                      (write_rs1 ? ~sb_q[rs1] : 1'b1);
 
-  assign valid_instr = inst_ready_i
-                      & inst_valid_o
-                      & operands_ready
-                      & dst_ready
-                      & ((itlb_valid & itlb_ready) | ~trans_active);
-  assign acc_qvalid_o = is_acc_inst & valid_instr &
+  assign valid_instr = inst_rsp_i.q_ready
+                     & inst_req_o.q_valid
+                     & operands_ready
+                     & dst_ready
+                     & ((itlb_valid & itlb_ready) | ~trans_active);
+  assign acc_req_o.q_valid = is_acc_inst & valid_instr & ~exception &
                         ((is_fp_store | is_fp_load) ? (trans_ready & caq_qready) : 1'b1);
   // the accelerator interface stalled us. Also wait for CAQ if this is an FP load/store.
-  assign acc_stall = acc_qvalid_o & ~acc_qready_i | (caq_ena & ~caq_qready);
+  assign acc_stall = acc_req_o.q_valid & ~acc_rsp_i.q_ready | (caq_ena & ~caq_qready);
   // the coprocessor is not ready yet
   assign x_stall = EnableXif & ((x_issue_valid_o & ~x_issue_ready_i) | (x_register_valid_o & ~x_register_ready_i));
   // the LSU Interface didn't accept our request yet
@@ -594,7 +625,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       // if we are in debug mode, and encounter an exception go to exception address
       // the only exception is EBREAK which terminates the program buffer.
       if (debug_q && next_pc == Exception) begin
-        pc_d = (inst_data_i == EBREAK) ?
+        pc_d = (inst_rsp_i.data == EBREAK) ?
           DmBaseAddress + dm::HaltAddress : DmBaseAddress + dm::ExceptionAddress;
       end else begin
       end
@@ -606,12 +637,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // --------------------
   // Decoder
   // --------------------
-  assign rd = inst_data_i[7 + RegWidth - 1:7];
-  assign rs1 = inst_data_i[15 + RegWidth - 1:15];
-  assign rs2 = inst_data_i[20 + RegWidth - 1:20];
-  assign rs3 = inst_data_i[27 + RegWidth - 1:27];
+  assign rd = inst_rsp_i.data[7 + RegWidth - 1:7];
+  assign rs1 = inst_rsp_i.data[15 + RegWidth - 1:15];
+  assign rs2 = inst_rsp_i.data[20 + RegWidth - 1:20];
+  assign rs3 = inst_rsp_i.data[27 + RegWidth - 1:27];
 
   always_comb begin
+    unsupported_inst = 1'b0;
     illegal_inst = 1'b0;
     ecall = 1'b0;
     ebreak = 1'b0;
@@ -650,10 +682,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     is_fp_store = 1'b0;
     is_signed = 1'b0;
     ls_size = Byte;
-    ls_amo = reqrsp_pkg::AMONone;
+    ls_amo = AMONone;
 
     is_acc_inst = 1'b0;
-    acc_qreq_o.addr = FP_SS;
+    acc_req_o.q.addr = FP_SS;
     acc_register_rd = 1'b0;
 
     debug_d = (!debug_q && (
@@ -661,7 +693,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           // request to debug.
           (DebugSupport && irq_i.debug) ||
           // We encountered an ebreak and the default ebreak behaviour is switched off
-          (dcsr_q.ebreakm && inst_data_i == EBREAK) ||
+          (dcsr_q.ebreakm && inst_rsp_i.data == EBREAK) ||
           // This was a single-step
           dcsr_q.step)
         ) ? valid_instr : debug_q;
@@ -673,7 +705,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     // the low power state.
     wfi_d = ((DebugSupport && irq_i.debug) || debug_q || any_interrupt_pending) ? 1'b0 : wfi_q;
 
-    unique casez (inst_data_i)
+    unique casez (inst_rsp_i.data)
       ADD: begin
         opa_select = RegRs1;
         opb_select = RegRs2;
@@ -914,7 +946,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         csr_en = valid_instr;
       end
       CSRRS: begin  // Atomic Read and Set Bits in CSR
-        if (inst_data_i[31:20] != CSR_SC) begin
+        if (inst_rsp_i.data[31:20] != CSR_SC) begin
           alu_op = LOr;
           opa_select = RegRs1;
           opb_select = Csr;
@@ -929,7 +961,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       CSRRSI: begin
         // offload CSR enable to FP SS
-        if (inst_data_i[31:20] != CSR_SSR) begin
+        if (inst_rsp_i.data[31:20] != CSR_SSR) begin
           alu_op = LOr;
           opa_select = CsrImmediate;
           opb_select = Csr;
@@ -942,7 +974,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       CSRRC: begin // Atomic Read and Clear Bits in CSR
-        if (inst_data_i[31:20] != CSR_SC) begin
+        if (inst_rsp_i.data[31:20] != CSR_SC) begin
           alu_op = LNAnd;
           opa_select = RegRs1;
           opb_select = Csr;
@@ -956,7 +988,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       CSRRCI: begin
-        if (inst_data_i[31:20] != CSR_SSR) begin
+        if (inst_rsp_i.data[31:20] != CSR_SSR) begin
           alu_op = LNAnd;
           opa_select = CsrImmediate;
           opb_select = Csr;
@@ -1014,7 +1046,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOAdd;
+        ls_amo = AMOAdd;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1025,7 +1057,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOXor;
+        ls_amo = AMOXor;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1036,7 +1068,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOOr;
+        ls_amo = AMOOr;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1047,7 +1079,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOAnd;
+        ls_amo = AMOAnd;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1058,7 +1090,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOMin;
+        ls_amo = AMOMin;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1069,7 +1101,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOMax;
+        ls_amo = AMOMax;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1080,7 +1112,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOMinu;
+        ls_amo = AMOMinu;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1091,7 +1123,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOMaxu;
+        ls_amo = AMOMaxu;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1102,7 +1134,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOSwap;
+        ls_amo = AMOSwap;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1113,7 +1145,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOLR;
+        ls_amo = AMOLR;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1124,7 +1156,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         is_load = 1'b1;
         is_signed = 1'b1;
         ls_size = Word;
-        ls_amo = reqrsp_pkg::AMOSC;
+        ls_amo = AMOSC;
         opa_select = RegRs1;
         opb_select = RegRs2;
       end
@@ -1148,7 +1180,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         opa_select = RegRs1;
         opb_select = RegRs2;
         acc_register_rd = 1'b1;
-        acc_qreq_o.addr = IPU;
+        acc_req_o.q.addr = IPU;
       end
       P_ABS: begin                 // Xpulpv2: p.abs
         if (Xpulpabs) begin
@@ -1156,9 +1188,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           opa_select = RegRs1;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       P_EXTHS,                       // Xpulpv2: p.exths
@@ -1170,9 +1202,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           opa_select = RegRs1;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Immediate branching
@@ -1184,9 +1216,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           alu_op = Eq;
           opa_select = RegRs1;
           opb_select = PBImmediate;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       P_BNEIMM: begin // Xpulpv2: p.bneimm
@@ -1197,9 +1229,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           alu_op = Neq;
           opa_select = RegRs1;
           opb_select = PBImmediate;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       P_CLIP,               // Xpulpv2: p.clip
@@ -1209,9 +1241,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           opa_select = RegRs1;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       P_CLIPR,        // Xpulpv2: p.clipr
@@ -1222,9 +1254,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opb_select = RegRs2;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // 3 source registers (rs1, rs2, rd)
@@ -1238,9 +1270,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRs2;
           opc_select = RegRd;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // 2 source registers (rs1, rs2)
@@ -1255,9 +1287,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opb_select = RegRs2;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // 2 source registers (rs1, rs2)
@@ -1270,9 +1302,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opb_select = RegRs2;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Off-load to IPU coprocessor
@@ -1322,9 +1354,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           opa_select = RegRs1;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // 2 source registers (rs1, rs2)
@@ -1403,9 +1435,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opb_select = RegRs2;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // 2 source registers (rs1, rd)
@@ -1423,9 +1455,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opc_select = RegRd;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // 3 source registers (rs1, rs2, rd)
@@ -1448,9 +1480,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRs2;
           opc_select = RegRd;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr = IPU;
+          acc_req_o.q.addr = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Offload FP-FP Instructions - fire and forget
@@ -1471,11 +1503,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FNMSUB_S,
       FNMADD_S: begin
         if (FP_EN && RVF
-          && (!(inst_data_i inside {FDIV_S, FSQRT_S}) || XDivSqrt)) begin
+          && (!(inst_rsp_i.data inside {FDIV_S, FSQRT_S}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectors
@@ -1505,11 +1537,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFCPKA_S_S,
       VFCPKA_S_D: begin
         if (FP_EN && XFVEC && RVF && RVD
-            && (!(inst_data_i inside {VFDIV_S, VFDIV_R_S, VFSQRT_S}) || XDivSqrt)) begin
+            && (!(inst_rsp_i.data inside {VFDIV_S, VFDIV_R_S, VFSQRT_S}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFSUM_S,
@@ -1518,7 +1550,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Double Precision Floating-Point
@@ -1536,11 +1568,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMSUB_D,
       FNMSUB_D,
       FNMADD_D: begin
-        if (FP_EN && RVD && (!(inst_data_i inside {FDIV_D, FSQRT_D}) || XDivSqrt)) begin
+        if (FP_EN && RVD && (!(inst_rsp_i.data inside {FDIV_D, FSQRT_D}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_S_D,
@@ -1549,7 +1581,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // [Alt] Half Precision Floating-Point
@@ -1568,15 +1600,15 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMIN_H,
       FMAX_H: begin
         if (FP_EN && XF16 && fcsr_q.fmode.dst == 1'b0 &&
-            (!(inst_data_i inside {FDIV_H, FSQRT_H}) || XDivSqrt)) begin
+            (!(inst_rsp_i.data inside {FDIV_H, FSQRT_H}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else if (FP_EN && XF16ALT && fcsr_q.fmode.dst == 1'b1 &&
-            (!(inst_data_i inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
+            (!(inst_rsp_i.data inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FMACEX_S_H,
@@ -1585,7 +1617,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_S_H: begin
@@ -1596,7 +1628,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_H_S: begin
@@ -1607,7 +1639,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_D_H: begin
@@ -1618,7 +1650,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_H_D: begin
@@ -1629,7 +1661,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // FCVT_H_H: begin
@@ -1638,7 +1670,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       //     write_rd = 1'b0;
       //     is_acc_inst = 1'b1;
       //   end else begin
-      //     illegal_inst = 1'b1;
+      //     unsupported_inst = 1'b1;
       //   end
       // end
 
@@ -1668,18 +1700,18 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFSGNJX_R_H: begin
         if (FP_EN && XFVEC && FLEN >= 32) begin
           if (XF16 && fcsr_q.fmode.dst == 1'b0 &&
-              (!(inst_data_i inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
+              (!(inst_rsp_i.data inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else if (XF16ALT && fcsr_q.fmode.dst == 1'b1 &&
-              (!(inst_data_i inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
+              (!(inst_rsp_i.data inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFSUM_H,
@@ -1690,10 +1722,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_D_S,
@@ -1703,10 +1735,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCPKA_H_S,
@@ -1721,10 +1753,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_S_H,
@@ -1737,10 +1769,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCPKA_H_D,
@@ -1753,10 +1785,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_H_H,
@@ -1766,10 +1798,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFDOTPEX_S_H,
@@ -1784,10 +1816,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // [Alternate] Quarter Precision Floating-Point
@@ -1812,7 +1844,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FMACEX_S_B,
@@ -1821,7 +1853,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_S_B: begin
@@ -1832,7 +1864,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_B_S: begin
@@ -1843,7 +1875,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_D_B: begin
@@ -1854,7 +1886,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_B_D: begin
@@ -1865,7 +1897,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_H_B: begin
@@ -1877,13 +1909,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
             end else begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FCVT_B_H: begin
@@ -1895,13 +1927,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
             end else begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectorized [Alternate] Quarter Precision Floating-Point
@@ -1929,11 +1961,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFSGNJX_B,
       VFSGNJX_R_B: begin
         if (FP_EN && XFVEC && XF8 && FLEN >= 16
-          && (!(inst_data_i inside {VFDIV_B, VFDIV_R_B, VFSQRT_B}) || XDivSqrt)) begin
+          && (!(inst_rsp_i.data inside {VFDIV_B, VFDIV_R_B, VFSQRT_B}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFSUM_B,
@@ -1944,10 +1976,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_B_S,
@@ -1964,10 +1996,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_S_B,
@@ -1980,10 +2012,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCPKA_B_D,
@@ -1998,10 +2030,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_B_H,
@@ -2014,13 +2046,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
             end else begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_H_B,
@@ -2033,13 +2065,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
             end else begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFCVT_B_B,
@@ -2049,10 +2081,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       VFDOTPEX_H_B,
@@ -2069,13 +2101,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
             end else begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Offload FP-Int Instructions - fire and forget
@@ -2092,7 +2124,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Single Precision Floating-Point
@@ -2109,7 +2141,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectors
@@ -2132,7 +2164,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // [Alternate] Half Precision Floating-Point
@@ -2154,7 +2186,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectors
@@ -2183,7 +2215,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             is_acc_inst = 1'b1;
             acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
@@ -2202,7 +2234,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             is_acc_inst = 1'b1;
             acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
@@ -2225,7 +2257,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectors
@@ -2253,7 +2285,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             is_acc_inst = 1'b1;
             acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
@@ -2273,7 +2305,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             is_acc_inst = 1'b1;
             acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
@@ -2286,7 +2318,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Single Precision Floating-Point
@@ -2298,7 +2330,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // [Alternate] Half Precision Floating-Point
@@ -2314,7 +2346,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectors
@@ -2329,7 +2361,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
@@ -2346,7 +2378,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Vectors
@@ -2361,25 +2393,20 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
-      // FP Sequencer and Postmod
+      // FP Sequencer and Core-V post-increment loads
       FREP_O,
-      P_LB_IRPOST,
-      P_LBU_IRPOST,
-      P_LH_IRPOST,
-      P_LHU_IRPOST,
-      P_LW_IRPOST,
-      P_LB_RRPOST,
-      P_LBU_RRPOST,
-      P_LH_RRPOST,
-      P_LHU_RRPOST,
-      P_LW_RRPOST : begin
-        if (Xpulppostmod == 1) begin
-          casez (inst_data_i)
-            P_LB_IRPOST: begin  //  p.lb rd,iimm(rs1!)
+      CV_LB_IRPOST,
+      CV_LBU_IRPOST,
+      CV_LH_IRPOST,
+      CV_LHU_IRPOST,
+      CV_LW_IRPOST : begin
+        if (Xcvmem) begin
+          casez (inst_rsp_i.data)
+            CV_LB_IRPOST: begin
               write_rd = 1'b0;
               write_rs1 = 1'b1;
               is_load = 1'b1;
@@ -2388,7 +2415,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               opa_select = RegRs1;
               opb_select = IImmediate;
             end
-            P_LBU_IRPOST: begin // p.lbu
+            CV_LBU_IRPOST: begin
               write_rd = 1'b0;
               write_rs1 = 1'b1;
               is_load = 1'b1;
@@ -2396,7 +2423,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               opa_select = RegRs1;
               opb_select = IImmediate;
             end
-            P_LH_IRPOST: begin  //p.lh
+            CV_LH_IRPOST: begin
               write_rd = 1'b0;
               write_rs1 = 1'b1;
               is_load = 1'b1;
@@ -2406,7 +2433,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               opa_select = RegRs1;
               opb_select = IImmediate;
             end
-            P_LHU_IRPOST: begin //p.lhu
+            CV_LHU_IRPOST: begin
               write_rd = 1'b0;
               write_rs1 = 1'b1;
               is_load = 1'b1;
@@ -2415,7 +2442,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               opa_select = RegRs1;
               opb_select = IImmediate;
             end
-            P_LW_IRPOST: begin //p.lw
+            CV_LW_IRPOST: begin
               write_rd = 1'b0;
               write_rs1 = 1'b1;
               is_load = 1'b1;
@@ -2424,90 +2451,112 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               ls_size = Word;
               opa_select = RegRs1;
               opb_select = IImmediate;
-            end
-            P_LB_RRPOST: begin //p.lb rd,rs2(rs1!)
-              write_rd = 1'b0;
-              write_rs1 = 1'b1;
-              is_load = 1'b1;
-              is_postincr = 1'b1;
-              is_signed = 1'b1;
-              opa_select = RegRs1;
-              opb_select = RegRs2;
-            end
-            P_LBU_RRPOST: begin //p.lbu
-              write_rd = 1'b0;
-              write_rs1 = 1'b1;
-              is_load = 1'b1;
-              is_postincr = 1'b1;
-              opa_select = RegRs1;
-              opb_select = RegRs2;
-            end
-            P_LH_RRPOST: begin //p.lh
-              write_rd = 1'b0;
-              write_rs1 = 1'b1;
-              is_load = 1'b1;
-              is_postincr = 1'b1;
-              is_signed = 1'b1;
-              ls_size = HalfWord;
-              opa_select = RegRs1;
-              opb_select = RegRs2;
-            end
-            P_LHU_RRPOST: begin //p.lhu
-              write_rd = 1'b0;
-              write_rs1 = 1'b1;
-              is_load = 1'b1;
-              is_postincr = 1'b1;
-              ls_size = HalfWord;
-              opa_select = RegRs1;
-              opb_select = RegRs2;
-            end
-            P_LW_RRPOST: begin //p.lw
-              write_rd = 1'b0;
-              write_rs1 = 1'b1;
-              is_load = 1'b1;
-              is_postincr = 1'b1;
-              is_signed = 1'b1;
-              ls_size = Word;
-              opa_select = RegRs1;
-              opb_select = RegRs2;
             end
             default: begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           endcase
         end else begin
-          if (FP_EN && (inst_data_i ==? FREP_O) ) begin
+          if (Xfrep && FP_EN && (inst_rsp_i.data ==? FREP_O)) begin
             opa_select = RegRs1;
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else begin
-            illegal_inst = 1'b1;
+            unsupported_inst = 1'b1;
           end
         end
       end
-      P_LB_RR: begin      // p.lb rd,rs2(rs1)
-        if (Xpulppostmod == 1) begin
+      // Core-V post-increment reg-reg loads
+      CV_LB_RRPOST: begin
+        if (Xcvmem) begin
+          write_rd = 1'b0;
+          write_rs1 = 1'b1;
+          is_load = 1'b1;
+          is_postincr = 1'b1;
+          is_signed = 1'b1;
+          opa_select = RegRs1;
+          opb_select = RegRs2;
+        end else begin
+          unsupported_inst = 1'b1;
+        end
+      end
+      CV_LBU_RRPOST: begin
+        if (Xcvmem) begin
+          write_rd = 1'b0;
+          write_rs1 = 1'b1;
+          is_load = 1'b1;
+          is_postincr = 1'b1;
+          opa_select = RegRs1;
+          opb_select = RegRs2;
+        end else begin
+          unsupported_inst = 1'b1;
+        end
+      end
+      CV_LH_RRPOST: begin
+        if (Xcvmem) begin
+          write_rd = 1'b0;
+          write_rs1 = 1'b1;
+          is_load = 1'b1;
+          is_postincr = 1'b1;
+          is_signed = 1'b1;
+          ls_size = HalfWord;
+          opa_select = RegRs1;
+          opb_select = RegRs2;
+        end else begin
+          unsupported_inst = 1'b1;
+        end
+      end
+      CV_LHU_RRPOST: begin
+        if (Xcvmem) begin
+          write_rd = 1'b0;
+          write_rs1 = 1'b1;
+          is_load = 1'b1;
+          is_postincr = 1'b1;
+          ls_size = HalfWord;
+          opa_select = RegRs1;
+          opb_select = RegRs2;
+        end else begin
+          unsupported_inst = 1'b1;
+        end
+      end
+      CV_LW_RRPOST: begin
+        if (Xcvmem) begin
+          write_rd = 1'b0;
+          write_rs1 = 1'b1;
+          is_load = 1'b1;
+          is_postincr = 1'b1;
+          is_signed = 1'b1;
+          ls_size = Word;
+          opa_select = RegRs1;
+          opb_select = RegRs2;
+        end else begin
+          unsupported_inst = 1'b1;
+        end
+      end
+      // Core-V register-register loads
+      CV_LB_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_load = 1'b1;
           is_signed = 1'b1;
           opa_select = RegRs1;
           opb_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_LBU_RR: begin     // p.lbu
-        if (Xpulppostmod == 1) begin
+      CV_LBU_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_load = 1'b1;
           opa_select = RegRs1;
           opb_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_LH_RR: begin      // p.lh
-        if (Xpulppostmod == 1) begin
+      CV_LH_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_load = 1'b1;
           is_signed = 1'b1;
@@ -2515,22 +2564,22 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opb_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_LHU_RR: begin     // p.lhu
-        if (Xpulppostmod == 1) begin
+      CV_LHU_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_load = 1'b1;
           ls_size = HalfWord;
           opa_select = RegRs1;
           opb_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_LW_RR: begin      // p.lw
-        if (Xpulppostmod == 1) begin
+      CV_LW_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_load = 1'b1;
           is_signed = 1'b1;
@@ -2538,15 +2587,16 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opa_select = RegRs1;
           opb_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
+      // CV-X post-increment reg-reg stores
       // opb is usually assigned with the content of rs2; in stores with reg-reg
       // addressing mode, however, the offset is stored in rd, so rd content is
       // instead assigned to opb: if we cross such signals now (rd -> opb,
       // rs2 -> opc) we don't have to do that in the ALU, with bigger muxes
-      P_SB_RRPOST: begin  // p.sb rs2,rd(rs1!)
-        if (Xpulppostmod == 1) begin
+      CV_SB_RRPOST: begin  // p.sb rs2,rd(rs1!)
+        if (Xcvmem) begin
           write_rd = 1'b0;
           write_rs1 = 1'b1;
           is_store = 1'b1;
@@ -2555,11 +2605,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRd; // rd offset
           opc_select = RegRs2; // rs2 source data
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_SH_RRPOST: begin  // p.sh
-        if (Xpulppostmod == 1) begin
+      CV_SH_RRPOST: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           write_rs1 = 1'b1;
           is_store = 1'b1;
@@ -2569,11 +2619,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRd;
           opc_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_SW_RRPOST: begin  // p.sw
-        if (Xpulppostmod == 1) begin
+      CV_SW_RRPOST: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           write_rs1 = 1'b1;
           is_store = 1'b1;
@@ -2583,22 +2633,23 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRd;
           opc_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_SB_RR: begin      // p.sb rs2,rs3(rs1)
-        if (Xpulppostmod == 1) begin
+      // Core-V register-register stores
+      CV_SB_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_store = 1'b1;
           opa_select = RegRs1;
           opb_select = RegRd;
           opc_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_SH_RR: begin      // p.sh
-        if (Xpulppostmod == 1) begin
+      CV_SH_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_store = 1'b1;
           ls_size = HalfWord;
@@ -2606,11 +2657,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRd;
           opc_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-      P_SW_RR: begin      // p.sw
-        if (Xpulppostmod == 1) begin
+      CV_SW_RR: begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           is_store = 1'b1;
           ls_size = Word;
@@ -2618,7 +2669,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRd;
           opc_select = RegRs2;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Floating-Point Load/Store
@@ -2632,7 +2683,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Word;
           is_fp_load = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FSW: begin
@@ -2644,7 +2695,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Word;
           is_fp_store = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Double Precision Floating-Point
@@ -2657,7 +2708,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Double;
           is_fp_load = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FSD: begin
@@ -2669,7 +2720,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Double;
           is_fp_store = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Half Precision Floating-Point
@@ -2682,7 +2733,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = HalfWord;
           is_fp_load = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FSH: begin
@@ -2694,7 +2745,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = HalfWord;
           is_fp_store = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // Quarter Precision Floating-Point
@@ -2707,7 +2758,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Byte;
           is_fp_load = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       FSB: begin
@@ -2719,11 +2770,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Byte;
           is_fp_store = 1'b1;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
       // DMA instructions
-      P_SB_IRPOST,
+      CV_SB_IRPOST,
       DMSRC,
       DMDST,
       DMSTR,
@@ -2736,7 +2787,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       DMUSER,
       FCVT_D_W_COPIFT,
       FCVT_D_WU_COPIFT : begin
-        if (Xpulppostmod) begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           uses_rd = 1'b0;
           write_rs1 = 1'b1;
@@ -2744,38 +2795,39 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           is_postincr = 1'b1;
           opa_select = RegRs1;
           opb_select = SImmediate;
+          opc_select = RegRs2;
         end else begin
-          casez (inst_data_i)
+          casez (inst_rsp_i.data)
             DMSRC,
             DMDST,
             DMSTR,
             DMUSER: begin
               if (Xdma) begin
-                acc_qreq_o.addr  = DMA_SS;
+                acc_req_o.q.addr  = DMA_SS;
                 opa_select   = RegRs1;
                 opb_select   = RegRs2;
                 is_acc_inst  = 1'b1;
                 write_rd     = 1'b0;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             DMCPYI,
             DMINIT: begin
               if (Xdma) begin
-                acc_qreq_o.addr     = DMA_SS;
+                acc_req_o.q.addr     = DMA_SS;
                 opa_select      = RegRs1;
                 is_acc_inst     = 1'b1;
                 write_rd        = 1'b0;
                 uses_rd         = 1'b1;
                 acc_register_rd = 1'b1;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             DMCPY: begin
               if (Xdma) begin
-                acc_qreq_o.addr     = DMA_SS;
+                acc_req_o.q.addr     = DMA_SS;
                 opa_select      = RegRs1;
                 opb_select      = RegRs2;
                 is_acc_inst     = 1'b1;
@@ -2783,40 +2835,40 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
                 uses_rd         = 1'b1;
                 acc_register_rd = 1'b1;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             DMSTATI: begin
               if (Xdma) begin
-                acc_qreq_o.addr     = DMA_SS;
+                acc_req_o.q.addr     = DMA_SS;
                 is_acc_inst     = 1'b1;
                 write_rd        = 1'b0;
                 uses_rd         = 1'b1;
                 acc_register_rd = 1'b1;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             DMSTAT: begin
               if (Xdma) begin
-                acc_qreq_o.addr     = DMA_SS;
+                acc_req_o.q.addr     = DMA_SS;
                 opb_select      = RegRs2;
                 is_acc_inst     = 1'b1;
                 write_rd        = 1'b0;
                 uses_rd         = 1'b1;
                 acc_register_rd = 1'b1;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             DMREP: begin
               if (Xdma) begin
-                acc_qreq_o.addr     = DMA_SS;
+                acc_req_o.q.addr     = DMA_SS;
                 opa_select      = RegRs1;
                 is_acc_inst     = 1'b1;
                 write_rd        = 1'b0;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             FCVT_D_W_COPIFT,
@@ -2825,21 +2877,21 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
                 write_rd = 1'b0;
                 is_acc_inst = 1'b1;
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             default: begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           endcase
         end
       end
 
-      P_SH_IRPOST,
+      CV_SH_IRPOST,
       SCFGRI,
       SCFGR,
       FLT_D_COPIFT: begin
-        if (Xpulppostmod) begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           uses_rd = 1'b0;
           write_rs1 = 1'b1;
@@ -2848,8 +2900,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = HalfWord;
           opa_select = RegRs1;
           opb_select = SImmediate;
+          opc_select = RegRs2;
         end else begin
-          unique casez (inst_data_i)
+          unique casez (inst_rsp_i.data)
             SCFGRI, FLT_D_COPIFT: begin
               if (FP_EN && RVD && Xcopift) begin
                 write_rd = 1'b0;
@@ -2857,34 +2910,34 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
               end else if (Xssr) begin
                 write_rd = 1'b0;
                 uses_rd = 1'b1;
-                acc_qreq_o.addr = SSR_CFG;
+                acc_req_o.q.addr = SSR_CFG;
                 is_acc_inst = 1'b1;
                 acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
               end else begin
-                illegal_inst = 1'b1;
+                unsupported_inst = 1'b1;
               end
             end
             SCFGR: begin
               if (Xssr) begin
                 write_rd = 1'b0;
                 uses_rd = 1'b1;
-                acc_qreq_o.addr = SSR_CFG;
+                acc_req_o.q.addr = SSR_CFG;
                 opb_select = RegRs2;
                 is_acc_inst = 1'b1;
                 acc_register_rd = 1'b1;
-              end else illegal_inst = 1'b1;
+              end else unsupported_inst = 1'b1;
             end
             default: begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           endcase
         end
       end
 
-      P_SW_IRPOST,
+      CV_SW_IRPOST,
       SCFGWI,
       SCFGW: begin
-        if (Xpulppostmod) begin
+        if (Xcvmem) begin
           write_rd = 1'b0;
           uses_rd = 1'b0;
           write_rs1 = 1'b1;
@@ -2893,27 +2946,28 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           ls_size = Word;
           opa_select = RegRs1;
           opb_select = SImmediate;
+          opc_select = RegRs2;
         end else begin
-          casez (inst_data_i)
+          casez (inst_rsp_i.data)
             SCFGWI: begin
               if (Xssr) begin
-                acc_qreq_o.addr = SSR_CFG;
+                acc_req_o.q.addr = SSR_CFG;
                 opa_select = RegRs1;
                 is_acc_inst = 1'b1;
                 write_rd = 1'b0;
-              end else illegal_inst = 1'b1;
+              end else unsupported_inst = 1'b1;
             end
             SCFGW: begin
               if (Xssr) begin
-                acc_qreq_o.addr = SSR_CFG;
+                acc_req_o.q.addr = SSR_CFG;
                 opa_select = RegRs1;
                 opb_select = RegRs2;
                 is_acc_inst = 1'b1;
                 write_rd = 1'b0;
-              end else illegal_inst = 1'b1;
+              end else unsupported_inst = 1'b1;
             end
             default: begin
-              illegal_inst = 1'b1;
+              unsupported_inst = 1'b1;
             end
           endcase
         end
@@ -2929,59 +2983,65 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           opb_select = RegRs2;
           opc_select = RegRd;
           acc_register_rd = 1'b1;
-          acc_qreq_o.addr  = IPU;
+          acc_req_o.q.addr  = IPU;
         end else begin
-          illegal_inst = 1'b1;
+          unsupported_inst = 1'b1;
         end
       end
-
-      default: begin // Offload the instruction to the coprocessor
-        if (EnableXif) begin
-          write_rd = x_issue_ready_i & x_issue_valid_o & x_issue_resp_i.writeback;
-
-          opa_select = RegRs1;
-          opb_select = RegRs2;
-          opc_select = RegRs3;
-
-          x_issue_req_o.instr    = inst_data_i;
-          x_issue_req_o.id       = xif_offload_counter_q;
-          x_issue_req_o.hartid   = hart_id_i;
-
-          x_register_o.hartid    = hart_id_i;
-          x_register_o.id        = xif_offload_counter_q;
-          x_register_o.rs        = {opc, opb, opa};
-          x_register_o.rs_valid  = {~sb_q[rs3], ~sb_q[rs2], ~sb_q[rs1]};
-
-          x_commit_o.hartid      = hart_id_i;
-          x_commit_o.id          = xif_offload_counter_q;
-          // We do not speculate so the commit_kill signal can be set statically to zero
-          x_commit_o.commit_kill = 1'b0;
-
-          // Since we cannot know whether a source register will be used or not by the processor,
-          // here we do not use valid_instr as in the other instructions
-          x_issue_valid_o         = inst_ready_i
-                                  & inst_valid_o
-                                  & ((itlb_valid & itlb_ready) | ~trans_active);
-
-          // Same as x_issue_valid since reigsters are provided instantly
-          x_register_valid_o      = x_issue_valid_o;
-
-          // Assert x_commit_valid as soon as there's a valid issue handshake
-          x_commit_valid_o        = x_issue_valid_o & x_issue_ready_i;
-
-          // Flag the instruction as illegal if not accepted by the coprocessor
-          illegal_inst = x_issue_ready_i & x_issue_valid_o & ~x_issue_resp_i.accept;
-        end else begin
-          illegal_inst = 1'b1;
-        end
+      default: begin
+        unsupported_inst = 1'b1;
       end
     endcase
+
+    // If the CV-X-IF interface is enabled, we try offloading unsupported instructions to the
+    // CV-X-IF coprocessors. Otherwise, unsupported instructions are illegal instructions.
+    if (unsupported_inst) begin
+      if (EnableXif) begin
+        write_rd = x_issue_ready_i & x_issue_valid_o & x_issue_resp_i.writeback;
+
+        opa_select = RegRs1;
+        opb_select = RegRs2;
+        opc_select = RegRs3;
+
+        x_issue_req_o.instr    = inst_rsp_i.data;
+        x_issue_req_o.id       = xif_offload_counter_q;
+        x_issue_req_o.hartid   = hart_id_i;
+
+        x_register_o.hartid    = hart_id_i;
+        x_register_o.id        = xif_offload_counter_q;
+        x_register_o.rs        = {opc, opb, opa};
+        x_register_o.rs_valid  = {~sb_q[rs3], ~sb_q[rs2], ~sb_q[rs1]};
+
+        x_commit_o.hartid      = hart_id_i;
+        x_commit_o.id          = xif_offload_counter_q;
+        // We do not speculate so the commit_kill signal can be set statically to zero
+        x_commit_o.commit_kill = 1'b0;
+
+        // Since we cannot know whether a source register will be used or not by the processor,
+        // here we do not use valid_instr as in the other instructions
+        x_issue_valid_o        = inst_rsp_i.q_ready
+                                & inst_req_o.q_valid
+                                & ((itlb_valid & itlb_ready) | ~trans_active);
+
+        // Same as x_issue_valid since registers are provided instantly
+        x_register_valid_o     = x_issue_valid_o;
+
+        // Assert x_commit_valid as soon as there's a valid issue handshake
+        x_commit_valid_o       = x_issue_valid_o & x_issue_ready_i;
+
+        // Unsupported instructions that are not accepted by any coprocessor are flagged as
+        // illegal. We currently assume that the coprocessor will accept the instruction in the
+        // same cycle as the issue handshake.
+        illegal_inst = x_issue_ready_i & x_issue_valid_o & ~x_issue_resp_i.accept;
+      end else begin
+        illegal_inst = 1'b1;
+      end
+    end
 
     // Sanitize illegal instructions so that they don't exert any side-effects.
     if (exception) begin
      write_rd = 1'b0;
      write_rs1 = 1'b0;
-     is_acc_inst = 1'b0;
      next_pc = Exception;
     end
   end
@@ -3002,7 +3062,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   always_ff @(posedge clk_i) begin
     if (!rst_i && illegal_inst && valid_instr) begin
       $info("[Illegal Instruction Core %0d] PC: %h Data: %h",
-            hart_id_i, inst_addr_o, inst_data_i);
+            hart_id_i, inst_req_o.addr, inst_rsp_i.data);
     end
   end
   // pragma translate_on
@@ -3072,7 +3132,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
 
     // DPC and DCSR update logic
     if (!debug_q) begin
-      if (valid_instr && inst_data_i == EBREAK) begin
+      if (valid_instr && inst_rsp_i.data == EBREAK) begin
         dpc_d = pc_q;
         dcsr_d.cause = dm::CauseBreakpoint;
       end else if (DebugSupport && irq_i.debug) begin
@@ -3086,8 +3146,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     // Right now we skip this due to simplicity.
     if (csr_en) begin
       // Check privilege level.
-      if ((priv_lvl_q & inst_data_i[29:28]) == inst_data_i[29:28]) begin
-        unique case (inst_data_i[31:20])
+      if ((priv_lvl_q & inst_rsp_i.data[29:28]) == inst_rsp_i.data[29:28]) begin
+        unique case (inst_rsp_i.data[31:20])
           CSR_MISA: csr_rvalue =
                               // A - Atomic Instructions extension
                                 (1   <<  0)
@@ -3375,14 +3435,14 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
 
       // Return from Environment.
-      if (inst_data_i == riscv_instr::MRET) begin
+      if (inst_rsp_i.data == riscv_instr::MRET) begin
         priv_lvl_d = mpp_q;
         ie_d[M] = pie_q[M];
         pie_d[M] = 1'b1;
         mpp_d = snitch_pkg::PrivLvlU; // set default back to U-Mode
       end
 
-      if (inst_data_i == riscv_instr::SRET) begin
+      if (inst_rsp_i.data == riscv_instr::SRET) begin
         priv_lvl_d = snitch_pkg::priv_lvl_t'({1'b0, spp_q});
         spp_d = 1'b0;
       end
@@ -3405,10 +3465,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // pragma translate_off
   always_ff @(posedge clk_i or posedge rst_i) begin
     // Display writes to CSR_DUMP
-    if (!rst_i && csr_dump && inst_valid_o && inst_ready_i && !stall) begin
+    if (!rst_i && csr_dump && inst_req_o.q_valid && inst_rsp_i.q_ready && !stall) begin
       // $timeformat(-9, 0, " ns", 0);
       $display("[Dump Core %0d] %t 0x%3h = 0x%08h, %d, %f", hart_id_i,
-               $time, inst_data_i[31:20], alu_result, alu_result, $bitstoshortreal(alu_result));
+               $time, inst_rsp_i.data[31:20], alu_result, alu_result, $bitstoshortreal(alu_result));
     end
   end
   // pragma translate_on
@@ -3421,7 +3481,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   assign en_copift_o = csr_copift_q;
 
   // Is an instruction a FP instruction (i.e. an instruction executed in the FPSS)
-  assign is_fp_inst = is_acc_inst && (acc_qreq_o.addr == FP_SS);
+  assign is_fp_inst = is_acc_inst && (acc_req_o.q.addr == FP_SS);
 
   // Read from F2I if rs==x31, queues are enabled and the instruction is an integer
   // instruction (not a FP instruction).
@@ -3434,15 +3494,15 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   assign rd_is_i2f = (rd == 'd31) & en_copift_o;
 
   // Integer-to-FP COPIFT queue
-  stream_fifo #(
-    .FALL_THROUGH(1'b0),
-    .DATA_WIDTH  (32),
-    .DEPTH       (16)
+  cc_stream_fifo #(
+    .FallThrough(1'b0),
+    .DataWidth  (32),
+    .Depth      (16)
   ) i_i2f_queue (
     .clk_i     (clk_i),
     .rst_ni    (~rst_i),
+    .clr_i     ('0),
     .flush_i   ('0),
-    .testmode_i('0),
     .usage_o   (),
     .data_i    (i2f_wdata),
     .valid_i   (i2f_wvalid),
@@ -3453,15 +3513,15 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   );
 
   // FP-to-integer COPIFT queue
-  stream_fifo #(
-    .FALL_THROUGH(1'b0),
-    .DATA_WIDTH  (32),
-    .DEPTH       (16)
+  cc_stream_fifo #(
+    .FallThrough(1'b0),
+    .DataWidth  (32),
+    .Depth      (16)
   ) i_f2i_queue (
     .clk_i     (clk_i),
     .rst_ni    (~rst_i),
+    .clr_i     ('0),
     .flush_i   ('0),
-    .testmode_i('0),
     .usage_o   (),
     .data_i    (f2i_wdata_i),
     .valid_i   (f2i_wvalid_i),
@@ -3581,13 +3641,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         alu_result = {30'b0, ~adder_result[32]};
       end
       Sltu: begin
-        alu_opa = $unsigned(opa);
-        alu_opb = -$unsigned(opb);
+        alu_opa = opa;
+        alu_opb = -opb;
         alu_result = {30'b0, adder_result[32]};
       end
       Geu: begin
-        alu_opa = $unsigned(opa);
-        alu_opb = -$unsigned(opb);
+        alu_opa = opa;
+        alu_opb = -opb;
         alu_result = {30'b0, ~adder_result[32]};
       end
       Sll: begin
@@ -3643,11 +3703,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       .page_fault_o ( dtlb_page_fault ),
       .pa_o ( dtlb_pa ),
       // Refill port
-      .valid_o ( ptw_valid_o [1] ),
-      .ready_i ( ptw_ready_i [1] ),
-      .va_o ( ptw_va_o [1] ),
-      .pte_i ( ptw_pte_i [1] ),
-      .is_4mega_i ( ptw_is_4mega_i [1] )
+      .valid_o ( ptw_req_o[1].valid ),
+      .ready_i ( ptw_rsp_i[1].ready ),
+      .va_o ( ptw_req_o[1].va ),
+      .pte_i ( ptw_rsp_i[1].pte ),
+      .is_4mega_i ( ptw_rsp_i[1].is_4mega )
     );
   end else begin : gen_no_dtlb
     // Tie off core-side interface (dtlb_pa unused as trans_active == '0)
@@ -3655,12 +3715,12 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     assign dtlb_ready       = 1'b0;
     assign dtlb_page_fault  = 1'b0;
     // Tie off TLB refill request
-    assign ptw_valid_o[1] = 1'b0;
-    assign ptw_va_o[1]    = '0;
+    assign ptw_req_o[1].valid = 1'b0;
+    assign ptw_req_o[1].va    = '0;
   end
 
-  assign ptw_ppn_o[0] = $unsigned(satp_q.ppn);
-  assign ptw_ppn_o[1] = $unsigned(satp_q.ppn);
+  assign ptw_req_o[0].ppn = satp_q.ppn;
+  assign ptw_req_o[1].ppn = satp_q.ppn;
 
   // Translation is active if it is set in SATP and we are not in machine mode or debug mode.
   assign trans_active = satp_q.mode & (priv_lvl_q != PrivLvlM) & ~debug_q;
@@ -3670,7 +3730,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
 
   assign dtlb_valid = (lsu_tlb_qvalid & trans_active) | ((is_fp_load | is_fp_store) & trans_active);
 
-  // Mulitplexer using and/or as this signal is likely timing critical.
+  // Multiplexer using and/or as this signal is likely timing critical.
   // Without virtual memory, address can be alu_result (i.e. rs1 + iimm/simm) or rs1 (for post-increment load/stores)
   assign ls_paddr[PPNSize+PageShift-1:PageShift] =
           ({(PPNSize){trans_active}} & dtlb_pa) |
@@ -3686,13 +3746,13 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // --------------------
   data_t lsu_qdata;
   // sign exten to appropriate length
-  assign lsu_qdata = $unsigned((ls_amo == reqrsp_pkg::AMONone) ? opc : opb);
+  assign lsu_qdata = (ls_amo == AMONone) ? opc : opb;
 
   // Consider CAQ in accelerator handshake when offloading an FPU load or store.
   assign caq_ena = is_fp_load | is_fp_store;
   // Make request to CAQ when offloading access and accelerator interface ready.
   // Do *not* issue request when a non-accelerator (CAQ-unrelated) stall is blocking progress.
-  assign caq_qvalid = caq_ena & acc_qready_i & ~nonacc_stall;
+  assign caq_qvalid = caq_ena & acc_rsp_i.q_ready & ~nonacc_stall;
 
   snitch_lsu #(
     .AddrWidth (AddrWidth),
@@ -3771,7 +3831,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   always_ff @(posedge clk_i) begin
     if (!rst_i && (ld_addr_misaligned || st_addr_misaligned) && valid_instr) begin
       $info("[Misaligned Load/Store Core %0d] PC: %h Data: %h Addr: %h",
-            hart_id_i, inst_addr_o, inst_data_i, alu_result);
+            hart_id_i, inst_req_o.addr, inst_rsp_i.data, alu_result);
     end
   end
   // pragma translate_on
@@ -3807,7 +3867,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     
     // external interfaces
     lsu_pready = 1'b0;
-    acc_pready_o = 1'b0;
+    acc_req_o.p_ready = 1'b0;
     // Always assert x_result_ready if the coprocessor does not request a write
     x_result_ready_o = ~x_result_i.we;
     retire_acc = 1'b0;
@@ -3828,16 +3888,16 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       i2f_wdata = ld_result[31:0];
 
       lsu_pready = ((lsu_rd =='d31) & en_copift_o) ? i2f_wready : 1'b1;
-    end else if (acc_pvalid_i) begin
+    end else if (acc_rsp_i.p_valid) begin
       retire_acc = 1'b1;
-      gpr_we[0] = ~((acc_prsp_i.id =='d31) & en_copift_o);
-      gpr_waddr[0] = acc_prsp_i.id;
-      gpr_wdata[0] = acc_prsp_i.data[31:0];
+      gpr_we[0] = ~((acc_rsp_i.p.id =='d31) & en_copift_o);
+      gpr_waddr[0] = acc_rsp_i.p.id;
+      gpr_wdata[0] = acc_rsp_i.p.data[31:0];
 
-      i2f_wvalid = ((acc_prsp_i.id =='d31) & en_copift_o);
-      i2f_wdata = acc_prsp_i.data[31:0];
+      i2f_wvalid = ((acc_rsp_i.p.id =='d31) & en_copift_o);
+      i2f_wdata = acc_rsp_i.p.data[31:0];
 
-      acc_pready_o = en_copift_o ? i2f_wready : 1'b1;
+      acc_req_o.p_ready = en_copift_o ? i2f_wready : 1'b1;
     end else if (EnableXif & x_result_valid_i & x_result_i.we) begin
       retire_x = 1'b1;
       gpr_we[0] = 1'b1;
@@ -3847,7 +3907,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     end
   end
 
-  assign inst_addr_misaligned = (inst_data_i inside {
+  assign inst_addr_misaligned = (inst_rsp_i.data inside {
     JAL,
     JALR,
     BEQ,
@@ -3865,8 +3925,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // the LSU or accelerator interface by withdrawing the valid signal.
   // TODO: Remove cacheability attribute, that should hold true for all instruction fetch transacitons.
   `ASSERT(InstructionInterfaceStable,
-      (inst_valid_o && inst_ready_i && inst_cacheable_o) ##1 (inst_valid_o && $stable(inst_addr_o))
-      |-> inst_ready_i && $stable(inst_data_i), clk_i, rst_i)
+      (inst_req_o.q_valid && inst_rsp_i.q_ready && inst_req_o.cacheable) ##1 (inst_req_o.q_valid && $stable(inst_req_o.addr))
+      |-> inst_rsp_i.q_ready && $stable(inst_rsp_i.data), clk_i, rst_i)
 
   // Make sure that we never write back an unknown value to the register file
   `ASSERT(RegWriteKnown, gpr_we & (gpr_waddr != 0) |-> !$isunknown(gpr_wdata), clk_i, rst_i)
@@ -3877,6 +3937,9 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   `ASSERT_INIT(CheckPMAExecute, SnitchPMACfg.NrExecuteRegionRules <= snitch_pma_pkg::NrMaxRules);
   `ASSERT_INIT(CheckPMACached, SnitchPMACfg.NrCachedRegionRules <= snitch_pma_pkg::NrMaxRules);
   `ASSERT_INIT(CheckPMAAMORegion, SnitchPMACfg.NrAMORegionRules <= snitch_pma_pkg::NrMaxRules);
+
+  // RVD implies RVF
+  `ASSERT_INIT(RvdImpliesRvf, !RVD || RVF);
 
   // Make sure that without virtual memory support, translation is never enabled
   `ASSERT(NoVMSupportNoTranslation, (~VMSupport |-> ~trans_active), clk_i, rst_i)

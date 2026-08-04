@@ -11,7 +11,7 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
   parameter ssr_cfg_t Cfg = '0,
   parameter int unsigned AddrWidth = 0,
   parameter int unsigned DataWidth = 0,
-  parameter type tcdm_user_t  = logic,
+  parameter int unsigned UserWidth = 0,
   parameter type tcdm_req_t   = logic,
   parameter type tcdm_rsp_t   = logic,
   parameter type isect_slv_req_t = logic,
@@ -48,16 +48,17 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
   data_t fifo_out, fifo_in;
   logic fifo_push, fifo_pop, fifo_full, fifo_empty;
   logic has_credit, credit_take, credit_give, credit_full;
-  logic [Cfg.RptWidth-1:0] rep_max, rep_q, rep_d, rep_done, rep_enable, rep_clear;
+  logic [Cfg.RptWidth-1:0] rep_max, rep_q, rep_d;
+  logic rep_done, rep_enable, rep_clear;
 
-  fifo_v3 #(
-    .FALL_THROUGH ( 0           ),
-    .DATA_WIDTH   ( DataWidth   ),
-    .DEPTH        ( Cfg.DataCredits )
+  cc_fifo #(
+    .FallThrough ( 0           ),
+    .DataWidth   ( DataWidth   ),
+    .Depth       ( Cfg.DataCredits )
   ) i_fifo (
     .clk_i,
     .rst_ni,
-    .testmode_i ( 1'b0       ),
+    .clr_i      ( '0         ),
     .flush_i    ( '0         ),
     .full_o     ( fifo_full  ),
     .empty_o    ( fifo_empty ),
@@ -80,7 +81,6 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
     .DataWidth    ( DataWidth   ),
     .tcdm_req_t   ( tcdm_req_t  ),
     .tcdm_rsp_t   ( tcdm_rsp_t  ),
-    .tcdm_user_t  ( tcdm_user_t ),
     .isect_slv_req_t ( isect_slv_req_t ),
     .isect_slv_rsp_t ( isect_slv_rsp_t ),
     .isect_mst_req_t ( isect_mst_req_t ),
@@ -128,7 +128,7 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
       .NrPorts    ( 2             ),
       .AddrWidth  ( AddrWidth     ),
       .DataWidth  ( DataWidth     ),
-      .user_t     ( tcdm_user_t   ),
+      .UserWidth  ( UserWidth     ),
       .RespDepth  ( Cfg.MuxRespDepth  ),
       .tcdm_req_t ( tcdm_req_t    ),
       .tcdm_rsp_t ( tcdm_rsp_t    )
@@ -148,7 +148,7 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
   end
 
   assign data_req.q_valid = data_req_qvalid;
-  assign data_req.q.amo = reqrsp_pkg::AMONone;
+  assign data_req.q.amo = snitch_pkg::AMONone;
   assign data_req.q.user = '0;
 
   assign lane_rdata_o = lane_zero ? '0 : fifo_out;
@@ -181,14 +181,14 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
 
   if (Cfg.IsectMaster) begin : gen_isect_master
     // A FIFO keeping the zero flag for in-flight reads only.
-    fifo_v3 #(
-      .FALL_THROUGH ( 0 ),
-      .DATA_WIDTH   ( 1 ),
-      .DEPTH        ( Cfg.DataCredits )
+    cc_fifo #(
+      .FallThrough ( 0 ),
+      .DataWidth   ( 1 ),
+      .Depth       ( Cfg.DataCredits )
     ) i_fifo_zero (
       .clk_i,
       .rst_ni,
-      .testmode_i ( 1'b0        ),
+      .clr_i      ( '0          ),
       .flush_i    ( '0          ),
       .full_o     (  ),
       .empty_o    ( zero_empty  ),

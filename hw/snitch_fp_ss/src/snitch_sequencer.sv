@@ -50,7 +50,7 @@ module snitch_sequencer import snitch_pkg::*; #(
 
   localparam int unsigned DepthBits = $clog2(BufferDepth);
   localparam int unsigned LoopCntBits = $clog2(NestDepth + 1);
-  localparam int unsigned LoopIdxBits = cf_math_pkg::idx_width(NestDepth);
+  localparam int unsigned LoopIdxBits = cc_pkg::idx_width(NestDepth);
   // We arbitrarily limit this to 16 bits, i.e. max 65536 iterations
   localparam int LoopIterBits = 16;
 
@@ -191,27 +191,6 @@ module snitch_sequencer import snitch_pkg::*; #(
       riscv_instr::VFMV_X_H,
       riscv_instr::VFCVT_X_H,
       riscv_instr::VFCVT_XU_H,
-      riscv_instr::FLE_AH,
-      riscv_instr::FLT_AH,
-      riscv_instr::FEQ_AH,
-      riscv_instr::FCLASS_AH,
-      riscv_instr::FMV_X_AH,
-      riscv_instr::VFEQ_AH,
-      riscv_instr::VFEQ_R_AH,
-      riscv_instr::VFNE_AH,
-      riscv_instr::VFNE_R_AH,
-      riscv_instr::VFLT_AH,
-      riscv_instr::VFLT_R_AH,
-      riscv_instr::VFGE_AH,
-      riscv_instr::VFGE_R_AH,
-      riscv_instr::VFLE_AH,
-      riscv_instr::VFLE_R_AH,
-      riscv_instr::VFGT_AH,
-      riscv_instr::VFGT_R_AH,
-      riscv_instr::VFCLASS_AH,
-      riscv_instr::VFMV_X_AH,
-      riscv_instr::VFCVT_X_AH,
-      riscv_instr::VFCVT_XU_AH,
       riscv_instr::FLE_B,
       riscv_instr::FLT_B,
       riscv_instr::FEQ_B,
@@ -248,10 +227,6 @@ module snitch_sequencer import snitch_pkg::*; #(
       riscv_instr::VFMV_H_X,
       riscv_instr::VFCVT_H_X,
       riscv_instr::VFCVT_H_XU,
-      riscv_instr::FMV_AH_X,
-      riscv_instr::VFMV_AH_X,
-      riscv_instr::VFCVT_AH_X,
-      riscv_instr::VFCVT_AH_XU,
       riscv_instr::FMV_B_X,
       riscv_instr::FCVT_B_W,
       riscv_instr::FCVT_B_WU,
@@ -286,8 +261,8 @@ module snitch_sequencer import snitch_pkg::*; #(
   logic core_frep_valid, core_frep_ready;
   logic core_direct_valid, core_direct_ready;
 
-  stream_demux #(
-    .N_OUP(3)
+  cc_stream_demux #(
+    .NumOup(3)
   ) i_input_demux (
     .inp_valid_i(inp_qvalid_i),
     .inp_ready_o(inp_qready_o),
@@ -335,12 +310,13 @@ module snitch_sequencer import snitch_pkg::*; #(
     qdata_argc: inp_qdata_argc_i
   };
 
-  ring_buffer #(
+  cc_ring_buffer #(
     .Depth(BufferDepth),
     .data_t(rb_entry_t)
   ) i_ring_buffer (
     .clk_i(clk_i),
     .rst_ni(~rst_i),
+    .clr_i(1'b0),
     .wvalid_i(core_rb_valid),
     .wready_o(core_rb_ready),
     .wdata_i(rb_wdata),
@@ -366,11 +342,12 @@ module snitch_sequencer import snitch_pkg::*; #(
 
     logic incr_iter;
 
-    trip_counter #(
-      .WIDTH(DepthBits)
+    cc_trip_counter #(
+      .Width(DepthBits)
     ) i_inst_counter (
       .clk_i(clk_i),
       .rst_ni(~rst_i),
+      .clr_i(1'b0),
       .en_i(incr_inst[i]),
       .delta_i(DepthBits'(1)),
       .bound_i(nest_cfg_q[i].max_inst),
@@ -379,11 +356,12 @@ module snitch_sequencer import snitch_pkg::*; #(
       .trip_o(incr_iter)
     );
 
-    trip_counter #(
-      .WIDTH(LoopIterBits)
+    cc_trip_counter #(
+      .Width(LoopIterBits)
     ) i_iter_counter (
       .clk_i(clk_i),
       .rst_ni(~rst_i),
+      .clr_i(1'b0),
       .en_i(incr_iter),
       .delta_i(LoopIterBits'(1)),
       .bound_i(nest_cfg_q[i].max_iter),
@@ -445,7 +423,7 @@ module snitch_sequencer import snitch_pkg::*; #(
 
     if (core_frep_valid && core_frep_ready) begin
       nest_cfg_d[loop_cnt_d].is_streamctl = inp_qdata_op_i[31];
-      nest_cfg_d[loop_cnt_d].max_inst = inp_qdata_op_i[20+:DepthBits];
+      nest_cfg_d[loop_cnt_d].max_inst = inp_qdata_op_i[20+:DepthBits] - 1;
       nest_cfg_d[loop_cnt_d].stagger_max = inp_qdata_op_i[14:12];
       nest_cfg_d[loop_cnt_d].stagger_mask = inp_qdata_op_i[11:8];
       nest_cfg_d[loop_cnt_d].max_iter = inp_qdata_arga_i[LoopIterBits-1:0];
@@ -472,7 +450,7 @@ module snitch_sequencer import snitch_pkg::*; #(
     // Mask to select only the loops which need to be considered
     // to find the innermost loop starting at the next instruction,
     // That is all loops j, with i < j <= loop_idx_q.
-    boxcar #(.Width(NestDepth)) i_last_iter_inner_loops_mask (
+    cc_boxcar #(.Width(NestDepth)) i_last_iter_inner_loops_mask (
       .lsb_i (loop_idx_t'(i)),
       .msb_i (loop_idx_q),
       .mask_o(last_iter_inner_loops_mask)
@@ -504,16 +482,15 @@ module snitch_sequencer import snitch_pkg::*; #(
   // That is all loops i, with loop_idx_q < i < loop_cnt_d.
   // We use the `loop_cnt_d` signal here, as we want to update `loop_idx_q`
   // right after receiving a nested FREP.
-  boxcar #(.Width(NestDepth)) i_inst_starts_mask (
+  cc_boxcar #(.Width(NestDepth)) i_inst_starts_mask (
     .lsb_i (loop_idx_q),
     .msb_i (loop_idx_t'(loop_cnt_d - 1)),
     .mask_o(inst_starts_mask)
   );
 
   // Find the innermost loop starting at the next instruction.
-  lzc #(
-    .WIDTH(NestDepth),
-    .MODE(1)
+  cc_lzc #(
+    .Width(NestDepth)
   ) i_loop_start_lzc (
     .in_i(inst_starts_mask & inst_starts_loop),
     .cnt_o(lzc_cnt),
@@ -533,16 +510,16 @@ module snitch_sequencer import snitch_pkg::*; #(
   assign loop_ends = last_inst & last_iter & last_iter_inner_loops;
 
   // Mask to select active loops only
-  heaviside #(.Width(NestDepth)) i_loop_active_mask (
+  cc_heaviside #(.Width(NestDepth)) i_loop_active_mask (
     .x_i(loop_idx_q),
     .mask_o(loop_active)
   );
 
   // Compute the innermost active loop which does not end with the current instruction,
   // using a trailing zero counter.
-  lzc #(
-    .WIDTH(NestDepth),
-    .MODE(0)
+  cc_lzc #(
+    .Width(NestDepth),
+    .Mode(cc_pkg::LZC_TRAILING_ZERO_CNT)
   ) i_loop_end_tzc (
     .in_i(loop_ends & loop_active),
     .cnt_o(outermost_ending_loop),
@@ -666,7 +643,7 @@ module snitch_sequencer import snitch_pkg::*; #(
     qdata_op:   seq_qdata_op,
     qdata_arga: rb_rdata.qdata_arga,
     qdata_argb: rb_rdata.qdata_argb,
-    qdata_argc: $unsigned(rb_rdata.qdata_argc),
+    qdata_argc: rb_rdata.qdata_argc,
     // When we repeat a previously issued instruction, communicate this
     // to subsystem (e.g. for single issuing of CAQ responses).
     qdata_repd: (iter_cnt[loop_idx_q] != 0)
@@ -689,9 +666,9 @@ module snitch_sequencer import snitch_pkg::*; #(
   };
 
   // Select direct path iff ring buffer is empty
-  stream_mux #(
-    .DATA_T(oup_data_t),
-    .N_INP(2)
+  cc_stream_mux #(
+    .data_t(oup_data_t),
+    .NumInp(2)
   ) i_output_mux (
     .inp_data_i({core_direct_data, seq_out_data}),
     .inp_valid_i({core_direct_valid, seq_out_valid}),
@@ -717,7 +694,7 @@ module snitch_sequencer import snitch_pkg::*; #(
   // pragma translate_off
   assign trace_port_o.source    = snitch_pkg::SrcFpuSeq;
   assign trace_port_o.cbuf_push = core_frep_valid && core_frep_ready;
-  assign trace_port_o.max_inst  = inp_qdata_op_i[20+:DepthBits];
+  assign trace_port_o.max_inst  = inp_qdata_op_i[20+:DepthBits] - 1;
   assign trace_port_o.max_iter  = inp_qdata_arga_i[LoopIterBits-1:0];
   assign trace_port_o.stg_max   = inp_qdata_op_i[14:12];
   assign trace_port_o.stg_mask  = inp_qdata_op_i[11:8];

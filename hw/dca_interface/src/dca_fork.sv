@@ -32,11 +32,12 @@ module dca_fork #(
   logic [NumLanes-1:0] flat_p_readies;
 
   // Fork the DCA request to all lanes
-  stream_fork #(
-    .N_OUP(NumLanes)
+  cc_stream_fork #(
+    .NumOup(NumLanes)
   ) i_dca_fork_fpu (
     .clk_i  (clk_i),
     .rst_ni (rst_ni),
+    .clr_i  (1'b0),
     .valid_i(slv_req_i.q_valid),
     .ready_o(slv_rsp_o.q_ready),
     .valid_o(flat_q_valids),
@@ -44,8 +45,8 @@ module dca_fork #(
   );
 
   // Join the DCA responses from all lanes
-  stream_join #(
-    .N_INP(NumLanes)
+  cc_stream_join #(
+    .NumInp(NumLanes)
   ) i_dca_join_fpu (
     .inp_valid_i(flat_p_valids),
     .inp_ready_o(flat_p_readies),

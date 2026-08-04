@@ -365,7 +365,7 @@ def load_opcodes():
 
 
 @lru_cache
-def disasm_inst(hex_inst, mc_exec='llvm-mc', mc_flags='-disassemble -mcpu=snitch'):
+def disasm_inst(hex_inst, mc_exec='llvm-mc', mc_flags='-disassemble'):
     """Disassemble a single RISC-V instruction using llvm-mc."""
     # Reverse the endianness of the hex instruction
     inst_fmt = ' '.join(f'0x{byte:02x}' for byte in bytes.fromhex(hex_inst)[::-1])
@@ -702,8 +702,26 @@ def eval_dma_metrics(dma_trans, dma_trace):
                 # to pre-compute from the core trace as it depends on address alignments, etc.)
                 if dma['backend']['req_valid'] and dma['backend']['req_ready']:
                     if req_bytes == 0:
+                        # Skip transactions which do not produce any burst on the
+                        # DMA backend, and hence do not appear in the DMA trace.
+                        # Zero-size transfers are rejected by the iDMA backend
+                        # (see the `reject_zero_tfs` backend parameter), and the
+                        # trailing placeholder transaction has no `size` set yet.
+                        while transfer_idx < len(dma_trans) and \
+                                dma_trans[transfer_idx].get('size', 0) == 0:
+                            transfer_idx += 1
+                        # Guard against more transfers appearing in the DMA trace
+                        # than were decoded from the core trace (e.g. if the core
+                        # trace was truncated). Stop evaluating DMA metrics rather
+                        # than crashing on the incomplete placeholder transaction.
+                        if transfer_idx >= len(dma_trans):
+                            print('Warning: DMA trace contains more transfers '
+                                  'than were decoded from the core trace; '
+                                  'stopping DMA metric evaluation.',
+                                  file=sys.stderr)
+                            break
                         exp_bytes = dma_trans[transfer_idx]['rep'] * \
-                                    dma_trans[transfer_idx]['size']
+                            dma_trans[transfer_idx]['size']
                         outst_transfers.append({'tstart': time,
                                                 'bytes': exp_bytes})
                     req_bytes += dma['backend']['req_length']
@@ -1037,25 +1055,41 @@ def annotate_insn(
 ) -> (str, tuple, bool
       ):  # Return time info, whether trace line contains no info, and fseq_len
 
-    # Disassemble instruction
-    match = re.search(DASM_IN_REGEX, line)
-    if match is not None:
-        line = re.sub(
-            DASM_IN_REGEX,
-            disasm_inst(match.groups()[0], mc_exec, mc_flags),
-            line,
-        )
+    # Parse the raw line first to detect frontend stall before disassembly
     match = re.search(TRACE_IN_REGEX, line.strip('\n'))
     if match is None:
         raise ValueError('Not a valid trace line:\n{}'.format(line))
     time_str, cycle_str, priv_lvl, pc_str, insn, _, extras_str = match.groups()
+
+    # Pre-check stall: when the Snitch instruction frontend is stalled,
+    # inst_rsp_i.data (the DASM source) is not a valid instruction encoding.
+    frontend_stalled = False
+    extras = None
+    if extras_str:
+        extras = read_annotations(extras_str)
+        if extras.get('source') == 'SrcSnitch' and extras.get('stall'):
+            frontend_stalled = True
+
+    # Disassemble instruction only when the frontend holds a valid instruction
+    dasm_match = re.search(DASM_IN_REGEX, line)
+    if dasm_match is not None and not frontend_stalled:
+        line = re.sub(
+            DASM_IN_REGEX,
+            disasm_inst(dasm_match.groups()[0], mc_exec, mc_flags),
+            line,
+        )
+        # Re-parse after substitution to get the disassembled mnemonic
+        match = re.search(TRACE_IN_REGEX, line.strip('\n'))
+        time_str, cycle_str, priv_lvl, pc_str, insn, _, extras_str = match.groups()
+
     time_info = (int(time_str), int(cycle_str))
     show_time_info = (dupl_time_info or time_info != last_time_info)
     time_info_strs = tuple(
         (str(elem) if show_time_info else '') for elem in time_info)
     # Annotated trace
     if extras_str:
-        extras = read_annotations(extras_str)
+        if extras is None:
+            extras = read_annotations(extras_str)
         # Parse lines traced by Snitch
         if extras['source'] == 'SrcSnitch':
             annot = annotate_snitch(extras, time_info[0], time_info[1],
@@ -1266,7 +1300,7 @@ def main():
     )
     parser.add_argument(
         '--mc-flags',
-        default='-disassemble -mcpu=snitch',
+        default='-disassemble',
         help='Flags to pass to the llvm-mc executable'
     )
 

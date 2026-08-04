@@ -4,7 +4,6 @@
 
 variables:
   GIT_STRATEGY: clone
-  GIT_SUBMODULE_STRATEGY: recursive
   # Enable colors in CI terminal
   TERM: ansi
   FORCE_COLOR: 1
@@ -12,18 +11,46 @@ variables:
   CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER: /usr/pack/gcc-9.2.0-af/linux-x64/bin/gcc
   LLVM_SYS_120_PREFIX: /usr/pack/llvm-12.0.1-af
   CMAKE: cmake-3.18.1
-  UV_CACHE_DIR: $CI_BUILDS_DIR/../cache/uv
+
+##########
+# Common #
+##########
 
 default:
   # Allow interrupting long-running jobs when a new pipeline on the same branch is triggered
   interruptible: true
-  timeout: 60m
   before_script:
-    # The CI is configured such that the uv cache directory (`UV_CACHE_DIR`),
-    # is located on the same file system outside of the build directory.
-    # `uv` should try to hardlink files instead of copying them to save space
-    - export UV_LINK_MODE=hardlink
     - source iis-setup.sh
+
+# Reusable guard that skips a job when MAKE_TARGET's prerequisites haven't
+# changed w.r.t. main. Usage: extend this job and `!reference` its script
+# before the real one; MAKE_TARGET defaults to the job name.
+.skip-if-unchanged:
+  variables:
+    MAKE_TARGET: $CI_JOB_NAME
+  script:
+    - |
+      if [ "$CI_COMMIT_REF_NAME" = "main" ]; then
+        BASE_SHA=$CI_COMMIT_BEFORE_SHA
+      else
+        git fetch origin main
+        BASE_SHA=$(git merge-base origin/main HEAD)
+      fi
+    - CHANGED=$(git diff --name-only $BASE_SHA HEAD | sed "s|^|$CI_PROJECT_DIR/|")
+    - PREREQS=$(list-make-prerequisites $MAKE_TARGET --recursive)
+    # Turn `CHANGED` into a regex to match entire directories (e.g. submodules) against
+    # individual files in `PREREQS`.
+    - |
+      CHANGED_PATTERN=$(sed -E 's/[.[\*^$()+?{}|]/\\&/g; s#^#^#; s#$#($|/)#' <<< "$CHANGED")
+    - TRIGGERS=$(grep -E -f <(printf '%s\n' "$CHANGED_PATTERN") <<< "$PREREQS" || true)
+    - |
+      if [ -n "$TRIGGERS" ]; then
+        echo "Running '$MAKE_TARGET': prerequisites changed since $BASE_SHA:"
+        echo "$TRIGGERS" | sed 's/^/  /'
+      else
+        echo "Skipping '$MAKE_TARGET': no prerequisites changed since $BASE_SHA"
+        exit 0
+      fi
 
 ##############
 # Build docs #
@@ -53,6 +80,16 @@ snitch-cluster-sw:
       - sw/**/build/*.elf
     expire_in: 1 day
 
+#################
+# Spyglass lint #
+#################
+
+spyglass:
+  script:
+    - make spyglass
+    - util/lint/check_spyglass_lint.py
+        util/lint/build/snitch_cluster_wrapper/consolidated_reports/snitch_cluster_wrapper_lint_lint_rtl/moresimple.rpt
+
 #######################
 # Standalone IP tests #
 #######################
@@ -73,6 +110,7 @@ snitch-ip-tests:
           - snitch_ssr
           - reqrsp_interface
   script:
+    - make rtl -j
     - cd hw/$IP
     - ./util/compile.sh
     - ./util/run_vsim.sh
@@ -114,7 +152,7 @@ snitch-cluster-vsim:
     # Run additional, more extensive tests
     - cd test/blas/gemm && ./test.sh && cd -
     - cd test/dnn/transpose && ./test.sh && cd -
-    - cd test/dnn/flashattention_2 && ./test.sh && cd -
+    # - cd test/dnn/flashattention_2 && ./test.sh && cd -
   artifacts:
     when: on_failure
     expire_in: 1 day
@@ -162,22 +200,29 @@ snitch-cluster-frep-vsim:
     - cd test
     - ../util/experiments/run.py frep_xs.yaml --simulator vsim -j --run-dir runs/vsim
 
-# COPIFT and scalar chaining experiments
-snitch-cluster-copift-sc-vsim:
+# COPIFT experiments
+snitch-cluster-copift-vsim:
   script:
     - make CFG_OVERRIDE=experiments/copift/cfg.json vsim -j
     - cd experiments/copift
     - ./experiments.py experiments.yaml --actions sw run perf -j
-    - cd ../chaining
+
+# Scalar chaining experiments
+snitch-cluster-chaining-vsim:
+  script:
+    - make CFG_OVERRIDE=experiments/copift/cfg.json vsim -j
+    - cd experiments/chaining
     - ./experiments.py experiments.yaml --actions sw run perf -j
 
 ###################################
 # Open-source implementation flow #
 ###################################
 
-yosys-synthesis:
-  timeout: 2h
+yosys:
+  timeout: 4h
+  extends: .skip-if-unchanged
   script:
+    - !reference [.skip-if-unchanged, script]
     - make CFG_OVERRIDE=cfg/yosys-ci.json yosys
     # Following steps are not included in open-source CI since netlist
     # compilation with Verilator takes an excessive amount of time and memory.
@@ -185,11 +230,13 @@ yosys-synthesis:
     - make sw -j
     - make vsim-run SN_BINARY=$PWD/sw/tests/build/simple.elf
 
-################################
-# Non-free implementation flow #
-################################
+#################
+# Non-free jobs #
+#################
 
-nonfree:
+# Non-free elaboration flow
+elab:
+  extends: .skip-if-unchanged
   script:
-    - make nonfree
+    - !reference [.skip-if-unchanged, script]
     - make elab

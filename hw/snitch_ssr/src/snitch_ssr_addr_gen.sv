@@ -14,7 +14,6 @@ module snitch_ssr_addr_gen import snitch_ssr_pkg::*; #(
   parameter int unsigned DataWidth = 0,
   parameter type tcdm_req_t   = logic,
   parameter type tcdm_rsp_t   = logic,
-  parameter type tcdm_user_t  = logic,
   parameter type isect_slv_req_t = logic,
   parameter type isect_slv_rsp_t = logic,
   parameter type isect_mst_req_t = logic,
@@ -193,7 +192,6 @@ module snitch_ssr_addr_gen import snitch_ssr_pkg::*; #(
       .DataWidth    ( DataWidth   ),
       .tcdm_req_t   ( tcdm_req_t  ),
       .tcdm_rsp_t   ( tcdm_rsp_t  ),
-      .tcdm_user_t  ( tcdm_user_t ),
       .isect_slv_req_t ( isect_slv_req_t ),
       .isect_slv_rsp_t ( isect_slv_rsp_t ),
       .isect_mst_req_t ( isect_mst_req_t ),
@@ -246,12 +244,13 @@ module snitch_ssr_addr_gen import snitch_ssr_pkg::*; #(
     end
 
     // Generate spill register at output to cut timing paths if desired.
-    spill_register #(
-      .T      ( out_spill_t         ),
+    cc_spill_register #(
+      .data_t ( out_spill_t         ),
       .Bypass ( !Cfg.IndirOutSpill  )
     ) i_out_spill (
       .clk_i,
       .rst_ni,
+      .clr_i   ( 1'b0 ),
       .valid_i ( spill_in_valid ),
       .ready_o ( spill_in_ready ),
       .data_i  ( spill_in_data  ),
