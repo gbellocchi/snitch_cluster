@@ -29,7 +29,6 @@ package snitch_cluster_wrapper_pkg;
   localparam int unsigned TcdmSize = 128;
   localparam int unsigned TcdmSizeNapotRounded = 1 << $clog2(TcdmSize);
   localparam int unsigned ClusterPeriphSize = 60;
-  localparam int unsigned ZeroMemorySize = 64;
   localparam int unsigned ExtMemorySize = 1;
 
   localparam int unsigned AddrWidth = 48;
