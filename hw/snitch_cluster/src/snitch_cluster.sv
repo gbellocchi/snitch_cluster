@@ -843,7 +843,6 @@ module snitch_cluster
     .clk_i,
     .rst_ni,
     .busy_o (),
-    .test_i (1'b0),
     .axi_req_i (soc_in_axi_req),
     .axi_resp_o (soc_in_axi_rsp),
     .mem_req_o ({ext_dma_req[1].q_valid, ext_dma_req[0].q_valid}),
