@@ -756,7 +756,7 @@ module snitch_cluster
   xbar_rule_t [DmaXbarCfg.NoAddrRules-1:0] enabled_dma_xbar_rule;
 
   assign dma_xbar_rules = '{
-    '{idx: BootRom,    start_addr: BootRomAliasStart,      end_addr: BootRomAliasEnd},
+    '{idx: BootRom,    start_addr: BootromAliasStart,      end_addr: BootromAliasEnd},
     '{idx: BootRom,    start_addr: bootrom_start_address,  end_addr: bootrom_end_address}
   };
 
@@ -1682,8 +1682,8 @@ module snitch_cluster
       .clk_i (clk_i),
       .rst_ni (rst_ni),
       .busy_o (),
-      .axi_req_i (wide_axi_slv_req[Bootrom]),
-      .axi_resp_o (wide_axi_slv_rsp[Bootrom]),
+      .axi_req_i (wide_axi_slv_req[BootRom]),
+      .axi_resp_o (wide_axi_slv_rsp[BootRom]),
       .mem_req_o (bootrom_req),
       .mem_gnt_i (bootrom_req),
       .mem_addr_o (bootrom_addr),
