@@ -453,6 +453,14 @@ module snitch_cluster
     return cnt;
   endfunction
 
+  // Reconstruct a per-core bitmask of which cores enable the `Xdma` ISA extension.
+  function automatic bit [NrCores-1:0] xdma_mask();
+    bit [NrCores-1:0] mask = '0;
+    for (int i = 0; i < NrCores; i++)
+      if (IsaCfg[i].Xdma) mask[i] = 1'b1;
+    return mask;
+  endfunction
+
   // --------
   // Typedefs
   // --------
@@ -866,6 +874,7 @@ module snitch_cluster
   // ------------
   // TCDM Arbiter
   // ------------
+  localparam bit [NrCores-1:0] Xdma = xdma_mask();
   localparam bit HasDmaCore = |Xdma;
 
   // Bridge the DMA OBI bus to the shared TCDM DMA bus.
