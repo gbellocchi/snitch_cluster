@@ -39,7 +39,7 @@ package snitch_cluster_wrapper_pkg;
   localparam int unsigned NrNarrowMasters = 3;
   localparam int unsigned NarrowIdWidthOut = $clog2(NrNarrowMasters) + NarrowIdWidthIn;
 
-  localparam int unsigned NrWideMasters = 1 + 1 + 1;
+  localparam int unsigned NrWideMasters = 1 + 1;
   localparam int unsigned WideIdWidthIn = 1;
   localparam int unsigned WideIdWidthOut = $clog2(NrWideMasters) + WideIdWidthIn;
 
