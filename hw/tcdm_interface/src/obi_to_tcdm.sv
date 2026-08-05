@@ -52,7 +52,7 @@ module obi_to_tcdm #(
     assign tcdm_req_o[i].q = '{
       addr:  obi_req_i[i].a.addr,
       write: obi_req_i[i].a.we,
-      amo:   reqrsp_pkg::AMONone,
+      amo:   snitch_pkg::AMONone,
       data:  obi_req_i[i].a.wdata,
       strb:  obi_req_i[i].a.be,
       user:  '0
