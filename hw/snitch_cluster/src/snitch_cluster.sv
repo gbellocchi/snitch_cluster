@@ -790,7 +790,8 @@ module snitch_cluster
   };
 
   always_comb begin
-    automatic int unsigned i = 0;
+    automatic int unsigned i;
+    i = 0;
     enabled_dma_addr_rule[i] = dma_addr_rule[0]; i++; // TCDM
     if (AliasRegionEnable) begin
       enabled_dma_addr_rule[i] = dma_addr_rule[1]; i++; // TCDM Alias
