@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // This test reproduces the exact DMA traffic pattern emitted by snrt_init_tls()
-// when the program has a large .tdata section. 
+// when the program has a large .tdata section.
 
 #include <snrt.h>
 #include <stdint.h>
@@ -11,9 +11,9 @@
 
 // Parameters are tuned on the exp kernel case.
 #define TDATA_BYTES 536
-#define TBSS_BYTES   72
-#define TLS_SLOT    1032  // (1 << SNRT_LOG2_STACK_SIZE) + 8
-#define N_COPIES       8  // snrt_cluster_core_num() - 1
+#define TBSS_BYTES 72
+#define TLS_SLOT 1032  // (1 << SNRT_LOG2_STACK_SIZE) + 8
+#define N_COPIES 8     // snrt_cluster_core_num() - 1
 
 // A fake L3 source: static array placed in BSS (0x80000000+).
 static uint8_t l3_src[TDATA_BYTES];

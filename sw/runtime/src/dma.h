@@ -483,59 +483,54 @@ inline void snrt_dma_memset(void *ptr, uint8_t value, uint32_t len) {
  * @param size The size of the transfer in bytes.
  * @param channel The index of the channel.
  */
-inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value, uint32_t size, uint32_t channel) {
+inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value,
+                                        uint32_t size, uint32_t channel) {
     register uint32_t reg_dst_low asm("a0") = ptr >> 0;    // 10
     register uint32_t reg_dst_high asm("a1") = ptr >> 32;  // 11
     register uint32_t reg_value asm("a2") = value;         // 12
     register uint32_t reg_txid asm("a3");                  // 13
     register uint32_t reg_size asm("a4") = size;           // 14
 
-
     // dmdst a0, a1
     asm volatile(".word %0\n" ::"i"(R_TYPE_ENCODE(DMDST_FUNCT7, 11, 10,
                                                   XDMA_FUNCT3, 0, OP_CUSTOM1)),
                  "r"(reg_dst_high), "r"(reg_dst_low));
-
-
 
     if (value == 0x00) {
         // register uint32_t cfg asm("a5") = channel << 2;        // 15
         uint32_t cfg = channel << 2;
         // dminit a3, a4, channel | 0b00
         asm volatile(".word %1\n"
-                    : "=r"(reg_txid)
-                    : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                        13, OP_CUSTOM1)),
-                    "r"(reg_size));
+                     : "=r"(reg_txid)
+                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
+                                         13, OP_CUSTOM1)),
+                       "r"(reg_size));
 
-    }
-    else if (value == 0xff) {
-        uint32_t cfg = channel << 2 | 1;        // 15
+    } else if (value == 0xff) {
+        uint32_t cfg = channel << 2 | 1;  // 15
 
         // dminit a3, a4, channel | 0b01
         asm volatile(".word %1\n"
-                    : "=r"(reg_txid)
-                    : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                        13, OP_CUSTOM1)),
-                    "r"(reg_size));
-    }
-    else {
-        uint32_t cfg = channel << 2 | 2;        // 15
+                     : "=r"(reg_txid)
+                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
+                                         13, OP_CUSTOM1)),
+                       "r"(reg_size));
+    } else {
+        uint32_t cfg = channel << 2 | 2;  // 15
 
         // dmsrc value, 0
-        asm volatile(".word %0\n" ::"i"(R_TYPE_ENCODE(DMSRC_FUNCT7, 0, 12,
-                                                    XDMA_FUNCT3, 0, OP_CUSTOM1)),
-                    "r"(reg_value));
+        asm volatile(".word %0\n" ::"i"(R_TYPE_ENCODE(
+                         DMSRC_FUNCT7, 0, 12, XDMA_FUNCT3, 0, OP_CUSTOM1)),
+                     "r"(reg_value));
 
         // dminit a3, a4, channel | 0b10
         asm volatile(".word %1\n"
-                    : "=r"(reg_txid)
-                    : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                        13, OP_CUSTOM1)),
-                    "r"(reg_size));
+                     : "=r"(reg_txid)
+                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
+                                         13, OP_CUSTOM1)),
+                       "r"(reg_size));
 
     }
-
 
     return reg_txid;
 }
