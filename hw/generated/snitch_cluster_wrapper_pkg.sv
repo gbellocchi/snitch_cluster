@@ -15,6 +15,7 @@
 
 
 
+
 `include "axi/typedef.svh"
 `include "tcdm_interface/typedef.svh"
 `include "dca_interface/typedef.svh"
@@ -1021,11 +1022,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1049,11 +1051,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1077,11 +1080,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1105,11 +1109,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1133,11 +1138,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1161,11 +1167,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1189,11 +1196,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1217,11 +1225,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 0,
       Xssr: 1,
       Xfrep: 1,
       Xcopift: 1,
-      XF16: 1,
+      Zfh: 1,
       XF16ALT: 1,
       XF8: 1,
       XF8ALT: 1,
@@ -1245,11 +1254,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: 0,
       RVF: 1,
       RVD: 1,
+      RVV: 0,
       Xdma: 1,
       Xssr: 0,
       Xfrep: 0,
       Xcopift: 0,
-      XF16: 0,
+      Zfh: 0,
       XF16ALT: 0,
       XF8: 0,
       XF8ALT: 0,
@@ -1314,7 +1324,7 @@ package snitch_cluster_wrapper_pkg;
   };
 
   // Forward potentially optional configuration parameters
-  localparam snitch_cluster_pkg::hart_id_t CfgBaseHartId    = (32'h0);
+  localparam snitch_pkg::hart_id_t   CfgBaseHartId        = (32'h0);
   localparam addr_t                  CfgClusterBaseAddr   = (48'h10000000);
   localparam addr_t                  CfgClusterBaseOffset = (48'h0);
 
@@ -1373,16 +1383,18 @@ package snitch_cluster_wrapper_pkg;
   localparam bit NarrowAxiPortExpose      = 0;
 
   // Per-core localparam arrays
-  localparam int unsigned NumIntOutstandingLoads [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
-  localparam int unsigned NumIntOutstandingMem   [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
-  localparam int unsigned NumFPOutstandingLoads  [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
-  localparam int unsigned NumFPOutstandingMem    [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
-  localparam int unsigned NumDTLBEntries         [NrCores] = '{1, 1, 1, 1, 1, 1, 1, 1, 1};
-  localparam int unsigned NumITLBEntries         [NrCores] = '{1, 1, 1, 1, 1, 1, 1, 1, 1};
-  localparam int unsigned NumSequencerInstr      [NrCores] = '{32, 32, 32, 32, 32, 32, 32, 32, 16};
-  localparam int unsigned NumSequencerLoops      [NrCores] = '{2, 2, 2, 2, 2, 2, 2, 2, 1};
-  localparam int unsigned NumSsrs                [NrCores] = '{3, 3, 3, 3, 3, 3, 3, 3, 1};
-  localparam int unsigned SsrMuxRespDepth        [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
+  localparam int unsigned NumIntOutstandingLoads   [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
+  localparam int unsigned NumIntOutstandingMem     [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
+  localparam int unsigned NumFPOutstandingLoads    [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
+  localparam int unsigned NumFPOutstandingMem      [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
+  localparam int unsigned NumDTLBEntries           [NrCores] = '{1, 1, 1, 1, 1, 1, 1, 1, 1};
+  localparam int unsigned NumITLBEntries           [NrCores] = '{1, 1, 1, 1, 1, 1, 1, 1, 1};
+  localparam int unsigned NumSequencerInstr        [NrCores] = '{32, 32, 32, 32, 32, 32, 32, 32, 16};
+  localparam int unsigned NumSequencerLoops        [NrCores] = '{2, 2, 2, 2, 2, 2, 2, 2, 1};
+  localparam int unsigned NumSsrs                  [NrCores] = '{3, 3, 3, 3, 3, 3, 3, 3, 1};
+  localparam int unsigned SsrMuxRspDepth           [NrCores] = '{4, 4, 4, 4, 4, 4, 4, 4, 4};
+  localparam bit          SpatzDoubleBw            [NrCores] = '{0, 0, 0, 0, 0, 0, 0, 0, 0};
+  localparam int unsigned NumSpatzOutstandingLoads [NrCores] = '{1, 1, 1, 1, 1, 1, 1, 1, 1};
 
 endpackage
 // verilog_lint: waive-stop package-filename

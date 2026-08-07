@@ -11,6 +11,7 @@
 #######################
 
 DEBUG        ?= OFF  # ON to turn on debugging symbols and wave logging
+TRACE        ?= ON   # OFF to turn off trace logging
 CFG_OVERRIDE ?=      # Override default configuration file
 TECH         ?=      # [gf12, ihp13] for physical simulation
 VCD_DUMP     ?= 0    # 1 to dump VCD traces
@@ -31,7 +32,7 @@ endif
 
 .PHONY: all clean
 all: rtl sw
-clean: clean-rtl clean-sw clean-work clean-logs clean-bender clean-misc
+clean: clean-rtl clean-sw clean-work clean-logs clean-bender clean-misc clean-toolchain
 
 ##########
 # Common #
@@ -125,6 +126,17 @@ $(GENERATED_DOCS_DIR)/peripherals.md: hw/snitch_cluster/src/snitch_cluster_perip
 
 $(DOXYGEN_DOCS_DIR): $(DOXYFILE) $(DOXYGEN_INPUTS)
 	doxygen $<
+
+#############
+# Toolchain #
+#############
+
+# Toolchain used by both RTL and SW stages
+include $(SN_ROOT)/make/toolchain.mk
+
+.PHONY: toolchain clean-toolchain
+toolchain: sn-toolchain
+clean-toolchain: sn-clean-toolchain
 
 #######
 # RTL #
@@ -258,6 +270,24 @@ clean-traces: sn-clean-traces
 clean-annotate: sn-clean-annotate
 clean-perf: sn-clean-perf
 clean-visual-trace: sn-clean-visual-trace
+
+############
+# IP tests #
+############
+
+IP_LIST  = mem_interface
+IP_LIST += tcdm_interface
+IP_LIST += snitch_ssr
+IP_LIST += snitch_cluster
+
+IP_TARGETS = $(addprefix test-,$(IP_LIST))
+
+.PHONY: test-ips
+
+test-ips: $(IP_TARGETS)
+
+$(IP_TARGETS): test-%:
+	cd hw/$* && ./util/compile.sh && ./util/run_vsim.sh
 
 ############################
 # Additional PHONY targets #

@@ -55,6 +55,23 @@ packages:
     source:
       Git: https://github.com/pulp-platform/common_verification.git
     dependencies: []
+  core_ips:
+    revision: 5cc30f0da57c7a7168452c1e30f96d158ccfa016
+    version: null
+    source:
+      Git: https://github.com/pulp-platform/core_ips.git
+    dependencies:
+    - axi
+    - common_cells
+    - fpnew
+    - reqrsp_interface
+  core_v_xif:
+    revision: fad32c62f07ec7304a7169640eaf946da3727f77
+    version: null
+    source:
+      Git: https://github.com/pulp-platform/core-v-xif.git
+    dependencies:
+    - common_cells
   fpnew:
     revision: 46cb33a4ce6b04b83ec38ebd288dd58a031a6390
     version: null
@@ -100,6 +117,15 @@ packages:
     - axi
     - common_cells
     - common_verification
+  reqrsp_interface:
+    revision: 390e41cd4885f09548dda6e1e989aee561e03986
+    version: 0.1.0
+    source:
+      Git: https://github.com/pulp-platform/reqrsp_interface.git
+    dependencies:
+    - axi
+    - common_cells
+    - tech_cells_generic
   riscv-dbg:
     revision: 358f90110220adf7a083f8b65d157e836d706236
     version: 0.8.1
@@ -114,6 +140,17 @@ packages:
     source:
       Git: https://github.com/pulp-platform/scm.git
     dependencies:
+    - tech_cells_generic
+  spatz_vpu:
+    revision: 039ea68967fe8d59fea3803f6ec3682cb1fde5b3
+    version: null
+    source:
+      Git: https://github.com/pulp-platform/spatz_vpu.git
+    dependencies:
+    - common_cells
+    - core_ips
+    - fpnew
+    - reqrsp_interface
     - tech_cells_generic
   tech_cells_generic:
     revision: 3a3de73632a06826b1bd9c65a0a2e92b32016845

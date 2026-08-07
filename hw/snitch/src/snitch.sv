@@ -19,6 +19,8 @@ Top-level Snitch core.
 Parameters:
   BootAddr               - Boot address of the core.
   IsaCfg                 - ISA configuration of the core.
+  NativeFpSupport        - Floating point instructions are natively supported through the
+                           accelerator interface, i.e., they have to be decoded by the core.
   AddrWidth              - Physical Address width of the core.
   DataWidth              - Data width of memory interface.
   VMSupport              - Enable virtual memory support.
@@ -62,8 +64,8 @@ Ports:
   f2i_wdata_i        - FPSS-to-integer (F2I) packet.
   f2i_wvalid_i       - F2I valid.
   f2i_wready_o       - F2I ready.
-  data_req_o         - Data interface (outgoing). Transactions need to be handled strictly in-order.
-  data_rsp_i         - Data interface (incoming). Transactions need to be handled strictly in-order.
+  lsu_req_o          - LSU interface (outgoing). Transactions need to be handled strictly in-order.
+  lsu_rsp_i          - LSU interface (incoming). Transactions need to be handled strictly in-order.
   ptw_req_o          - Address translation interface (outgoing).
   ptw_rsp_i          - Address translation interface (incoming).
   fpu_rnd_mode_o     - FPU control interface, rounding mode.
@@ -75,9 +77,14 @@ Ports:
   barrier_o          - Signals core's arrival on a cluster hardware barrier.
   barrier_i          - Signals to the core that it can depart from a cluster hardware barrier.
 */
-module snitch import snitch_pkg::*; import riscv_instr::*; #(
+module snitch
+  import snitch_pkg::*;
+  import lsu_pkg::*;
+  import snitch_riscv_instr::*; 
+#(
   parameter logic [31:0] BootAddr = 32'h0000_1000,
   parameter isa_cfg_t    IsaCfg = '0,
+  parameter bit          NativeFpSupport = 1'b0,
   parameter int unsigned AddrWidth = 48,
   parameter int unsigned DataWidth = 64,
   parameter bit          VMSupport = 1,
@@ -102,14 +109,17 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   localparam type x_register_t   = `CV_X_IF_REGISTER_STRUCT(XifIdWidth),
   localparam type x_commit_t     = `CV_X_IF_COMMIT_STRUCT(XifIdWidth),
   localparam type x_result_t     = `CV_X_IF_RESULT_STRUCT(XifIdWidth),
-  localparam type dreq_t         = `SNITCH_DATA_REQ_STRUCT(DataWidth, AddrWidth),
-  localparam type drsp_t         = `SNITCH_DATA_RSP_STRUCT(DataWidth),
+  localparam type lsu_req_t      = `LSU_REQ_STRUCT(DataWidth, AddrWidth, UserWidth),
+  localparam type lsu_rsp_t      = `LSU_RSP_STRUCT(DataWidth),
   localparam type ptw_req_t      = `SNITCH_PTW_REQ_STRUCT(AddrWidth),
   localparam type ptw_rsp_t      = `SNITCH_PTW_RSP_STRUCT(AddrWidth)
 ) (
   input  logic                  clk_i,
   input  logic                  rst_i,
-  input  logic [31:0]           hart_id_i,
+  // pragma translate_off
+  output snitch_trace_t         trace_o,
+  // pragma translate_on
+  input  hart_id_t              hart_id_i,
   input  interrupts_t           irq_i,
   output logic                  flush_i_valid_o,
   input  logic                  flush_i_ready_i,
@@ -135,8 +145,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   input  logic [31:0]           f2i_wdata_i,
   input  logic                  f2i_wvalid_i,
   output logic                  f2i_wready_o,
-  output dreq_t                 data_req_o,
-  input  drsp_t                 data_rsp_i,
+  output lsu_req_t              lsu_req_o,
+  input  lsu_rsp_t              lsu_rsp_i,
   output ptw_req_t [1:0]        ptw_req_o,
   input  ptw_rsp_t [1:0]        ptw_rsp_i,
   output fpnew_pkg::roundmode_e fpu_rnd_mode_o,
@@ -157,7 +167,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   localparam bit Xcopift              = IsaCfg.Xcopift;
   localparam bit RVF                  = IsaCfg.RVF;
   localparam bit RVD                  = IsaCfg.RVD;
-  localparam bit XF16                 = IsaCfg.XF16;
+  localparam bit Zfh                  = IsaCfg.Zfh;
   localparam bit XF16ALT              = IsaCfg.XF16ALT;
   localparam bit XF8                  = IsaCfg.XF8;
   localparam bit XF8ALT               = IsaCfg.XF8ALT;
@@ -182,15 +192,20 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   `SNITCH_TYPEDEF_PA_T(AddrWidth)
   `SNITCH_TYPEDEF_L0_PTE_T(AddrWidth)
 
-  localparam int unsigned FLEN  = calculate_flen(IsaCfg);
-  localparam bit          FP_EN = calculate_fp_enable(IsaCfg);
+  localparam int unsigned FLEN = calculate_flen(IsaCfg);
+  localparam bit          FpEn = calculate_fp_enable(IsaCfg);
 
   // Debug module's base address
   localparam logic [31:0] DmBaseAddress = 0;
   localparam int RegWidth = RVE ? 4 : 5;
   /// Total physical address portion.
   localparam int unsigned PPNSize = AddrWidth - PageShift;
-  localparam bit NSX = XF16 | XF16ALT | XF8 | XFVEC;
+  /// Non-ratified extensions are enabled
+  localparam bit NonRatifiedExtensions =
+      XF16ALT | XF8 | XF8ALT | XFVEC | XFDOTP | XFAUX | Xpulpabs |
+      Xpulpbitop | Xpulpbr | Xpulpclip | Xpulpmacsi | Xpulpminmax |
+      Xpulpslet | Xpulpvect | Xpulpvectshufflepack | Xcvmem | Xssr |
+      Xfrep | Xcopift | Xdma;
 
   // Number of read ports
   localparam int unsigned NumRfReadPorts = EnableXif | Xcvmem ? 3 : 2;
@@ -1502,7 +1517,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMSUB_S,
       FNMSUB_S,
       FNMADD_S: begin
-        if (FP_EN && RVF
+        if (NativeFpSupport && RVF
           && (!(inst_rsp_i.data inside {FDIV_S, FSQRT_S}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -1536,7 +1551,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFSGNJX_R_S,
       VFCPKA_S_S,
       VFCPKA_S_D: begin
-        if (FP_EN && XFVEC && RVF && RVD
+        if (NativeFpSupport && XFVEC && RVF && RVD
             && (!(inst_rsp_i.data inside {VFDIV_S, VFDIV_R_S, VFSQRT_S}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -1546,7 +1561,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFSUM_S,
       VFNSUM_S: begin
-        if (FP_EN && XFVEC && FLEN >= 64 && XFDOTP && RVF) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 64 && XFDOTP && RVF) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1568,7 +1583,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMSUB_D,
       FNMSUB_D,
       FNMADD_D: begin
-        if (FP_EN && RVD && (!(inst_rsp_i.data inside {FDIV_D, FSQRT_D}) || XDivSqrt)) begin
+        if (
+          NativeFpSupport && RVD &&
+          (!(inst_rsp_i.data inside {FDIV_D, FSQRT_D}) || XDivSqrt)
+        ) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1577,7 +1595,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       FCVT_S_D,
       FCVT_D_S: begin
-        if (FP_EN && RVF && RVD) begin
+        if (NativeFpSupport && RVF && RVD) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1599,11 +1617,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FSGNJX_H,
       FMIN_H,
       FMAX_H: begin
-        if (FP_EN && XF16 && fcsr_q.fmode.dst == 1'b0 &&
+        if (NativeFpSupport && Zfh && fcsr_q.fmode.dst == 1'b0 &&
             (!(inst_rsp_i.data inside {FDIV_H, FSQRT_H}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && XF16ALT && fcsr_q.fmode.dst == 1'b1 &&
+        end else if (NativeFpSupport && XF16ALT && fcsr_q.fmode.dst == 1'b1 &&
             (!(inst_rsp_i.data inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -1613,7 +1631,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       FMACEX_S_H,
       FMULEX_S_H: begin
-        if (FP_EN && RVF && XF16 && XFAUX) begin
+        if (NativeFpSupport && RVF && Zfh && XFAUX) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1621,10 +1639,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_S_H: begin
-        if (FP_EN && RVF && XF16 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && RVF && Zfh && fcsr_q.fmode.src == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVF && XF16ALT && fcsr_q.fmode.src == 1'b1) begin
+        end else if (NativeFpSupport && RVF && XF16ALT && fcsr_q.fmode.src == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1632,10 +1650,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_H_S: begin
-        if (FP_EN && RVF && XF16 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && RVF && Zfh && fcsr_q.fmode.dst == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVF && XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
+        end else if (NativeFpSupport && RVF && XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1643,10 +1661,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_D_H: begin
-        if (FP_EN && RVD && XF16 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && RVD && Zfh && fcsr_q.fmode.src == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVD && XF16ALT && fcsr_q.fmode.src == 1'b1) begin
+        end else if (NativeFpSupport && RVD && XF16ALT && fcsr_q.fmode.src == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1654,10 +1672,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_H_D: begin
-        if (FP_EN && RVD && XF16 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && RVD && Zfh && fcsr_q.fmode.dst == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVD && XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
+        end else if (NativeFpSupport && RVD && XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1665,7 +1683,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       // FCVT_H_H: begin
-      //   if (FP_EN && XF16 && XF16ALT &&
+      //   if (NativeFpSupport && Zfh && XF16ALT &&
       //      (fcsr_q.fmode.src != fcsr_q.fmode.dst)) begin
       //     write_rd = 1'b0;
       //     is_acc_inst = 1'b1;
@@ -1698,8 +1716,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFSGNJN_R_H,
       VFSGNJX_H,
       VFSGNJX_R_H: begin
-        if (FP_EN && XFVEC && FLEN >= 32) begin
-          if (XF16 && fcsr_q.fmode.dst == 1'b0 &&
+        if (NativeFpSupport && XFVEC && FLEN >= 32) begin
+          if (Zfh && fcsr_q.fmode.dst == 1'b0 &&
               (!(inst_rsp_i.data inside {VFDIV_H, VFDIV_R_H, VFSQRT_H}) || XDivSqrt)) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -1716,8 +1734,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFSUM_H,
       VFNSUM_H: begin
-        if (FP_EN && XFVEC && FLEN >= 64 && XFDOTP) begin
-          if ((XF16 && fcsr_q.fmode.src == 1'b0) ||
+        if (NativeFpSupport && XFVEC && FLEN >= 64 && XFDOTP) begin
+          if ((Zfh && fcsr_q.fmode.src == 1'b0) ||
              (XF16ALT && fcsr_q.fmode.src == 1'b1)) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -1730,7 +1748,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_D_S,
       VFCVTU_D_S: begin
-        if (FP_EN && XFVEC && RVF && FLEN >= 32) begin
+        if (NativeFpSupport && XFVEC && RVF && FLEN >= 32) begin
           if (RVF && RVD) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -1745,8 +1763,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFCPKB_H_S,
       VFCVT_H_S,
       VFCVTU_H_S: begin
-        if (FP_EN && XFVEC && RVF && FLEN >= 32) begin
-          if (XF16 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && XFVEC && RVF && FLEN >= 32) begin
+          if (Zfh && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else if (XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
@@ -1761,8 +1779,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_S_H,
       VFCVTU_S_H: begin
-        if (FP_EN && XFVEC && RVF && FLEN >= 32) begin
-          if (XF16 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && XFVEC && RVF && FLEN >= 32) begin
+          if (Zfh && fcsr_q.fmode.src == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else if (XF16ALT && fcsr_q.fmode.src == 1'b1) begin
@@ -1777,8 +1795,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCPKA_H_D,
       VFCPKB_H_D: begin
-        if (FP_EN && XFVEC && RVD && FLEN >= 32) begin
-          if (XF16 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && XFVEC && RVD && FLEN >= 32) begin
+          if (Zfh && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else if (XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
@@ -1793,7 +1811,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_H_H,
       VFCVTU_H_H: begin
-        if (FP_EN && XFVEC && RVF && XF16 && XF16ALT && FLEN >= 32) begin
+        if (NativeFpSupport && XFVEC && RVF && Zfh && XF16ALT && FLEN >= 32) begin
           if (fcsr_q.fmode.src != fcsr_q.fmode.dst) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -1810,8 +1828,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFNDOTPEX_S_R_H,
       VFSUMEX_S_H,
       VFNSUMEX_S_H: begin
-        if (FP_EN && XFVEC && FLEN >= 64 && XFDOTP && RVF) begin
-          if ((XF16 && fcsr_q.fmode.src == 1'b0) ||
+        if (NativeFpSupport && XFVEC && FLEN >= 64 && XFDOTP && RVF) begin
+          if ((Zfh && fcsr_q.fmode.src == 1'b0) ||
              (XF16ALT && fcsr_q.fmode.src == 1'b1)) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -1837,10 +1855,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMSUB_B,
       FNMSUB_B,
       FNMADD_B: begin
-        if (FP_EN && XF8 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && XF8 && fcsr_q.fmode.dst == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
+        end else if (NativeFpSupport && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1849,7 +1867,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       FMACEX_S_B,
       FMULEX_S_B: begin
-        if (FP_EN && RVF && XF16 && XFAUX) begin
+        if (NativeFpSupport && RVF && Zfh && XFAUX) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1857,10 +1875,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_S_B: begin
-        if (FP_EN && RVF && XF8 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && RVF && XF8 && fcsr_q.fmode.src == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVF && XF8ALT && fcsr_q.fmode.src == 1'b1) begin
+        end else if (NativeFpSupport && RVF && XF8ALT && fcsr_q.fmode.src == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1868,10 +1886,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_B_S: begin
-        if (FP_EN && RVF && XF8 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && RVF && XF8 && fcsr_q.fmode.dst == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVF && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
+        end else if (NativeFpSupport && RVF && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1879,10 +1897,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_D_B: begin
-        if (FP_EN && RVD && XF8 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && RVD && XF8 && fcsr_q.fmode.src == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVD && XF8ALT && fcsr_q.fmode.src == 1'b1) begin
+        end else if (NativeFpSupport && RVD && XF8ALT && fcsr_q.fmode.src == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1890,10 +1908,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_B_D: begin
-        if (FP_EN && RVD && XF8 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && RVD && XF8 && fcsr_q.fmode.dst == 1'b0) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && RVF && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
+        end else if (NativeFpSupport && RVF && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
         end else begin
@@ -1901,10 +1919,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_H_B: begin
-        if (FP_EN) begin
+        if (NativeFpSupport) begin
           if ((XF8 && fcsr_q.fmode.src == 1'b0) ||
              (XF8ALT && fcsr_q.fmode.src == 1'b1)) begin
-            if ((XF16 && fcsr_q.fmode.dst == 1'b0) ||
+            if ((Zfh && fcsr_q.fmode.dst == 1'b0) ||
                (XF16ALT && fcsr_q.fmode.dst == 1'b1)) begin
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
@@ -1919,8 +1937,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FCVT_B_H: begin
-        if (FP_EN) begin
-          if ((XF16 && fcsr_q.fmode.src == 1'b0) ||
+        if (NativeFpSupport) begin
+          if ((Zfh && fcsr_q.fmode.src == 1'b0) ||
              (XF16ALT && fcsr_q.fmode.src == 1'b1)) begin
             if ((XF8 && fcsr_q.fmode.dst == 1'b0) ||
                (XF8ALT && fcsr_q.fmode.dst == 1'b1)) begin
@@ -1960,7 +1978,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFSGNJN_R_B,
       VFSGNJX_B,
       VFSGNJX_R_B: begin
-        if (FP_EN && XFVEC && XF8 && FLEN >= 16
+        if (NativeFpSupport && XFVEC && XF8 && FLEN >= 16
           && (!(inst_rsp_i.data inside {VFDIV_B, VFDIV_R_B, VFSQRT_B}) || XDivSqrt)) begin
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -1970,7 +1988,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFSUM_B,
       VFNSUM_B: begin
-        if (FP_EN && XFVEC && FLEN >= 32 && XFDOTP) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 32 && XFDOTP) begin
           if ((XF8 && fcsr_q.fmode.src == 1'b0) ||
              (XF8ALT && fcsr_q.fmode.src == 1'b1)) begin
             write_rd = 1'b0;
@@ -1988,7 +2006,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFCPKB_B_S,
       VFCPKC_B_S,
       VFCPKD_B_S: begin
-        if (FP_EN && XFVEC && RVF && FLEN >= 16) begin
+        if (NativeFpSupport && XFVEC && RVF && FLEN >= 16) begin
           if (XF8 && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -2004,7 +2022,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_S_B,
       VFCVTU_S_B: begin
-        if (FP_EN && XFVEC && RVF && FLEN >= 16) begin
+        if (NativeFpSupport && XFVEC && RVF && FLEN >= 16) begin
           if (XF8 && fcsr_q.fmode.src == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -2022,7 +2040,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFCPKB_B_D,
       VFCPKC_B_D,
       VFCPKD_B_D: begin
-        if (FP_EN && XFVEC && RVD && FLEN >= 16) begin
+        if (NativeFpSupport && XFVEC && RVD && FLEN >= 16) begin
           if (XF8 && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -2038,8 +2056,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_B_H,
       VFCVTU_B_H: begin
-        if (FP_EN && XFVEC && FLEN >= 16) begin
-          if ((XF16 && fcsr_q.fmode.src == 1'b0) ||
+        if (NativeFpSupport && XFVEC && FLEN >= 16) begin
+          if ((Zfh && fcsr_q.fmode.src == 1'b0) ||
              (XF16ALT && fcsr_q.fmode.src == 1'b1)) begin
             if ((XF8 && fcsr_q.fmode.dst == 1'b0) ||
                (XF8ALT && fcsr_q.fmode.dst == 1'b1)) begin
@@ -2057,10 +2075,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_H_B,
       VFCVTU_H_B: begin
-        if (FP_EN && XFVEC && FLEN >= 16) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 16) begin
           if ((XF8 && fcsr_q.fmode.src == 1'b0) ||
              (XF8ALT && fcsr_q.fmode.src == 1'b1)) begin
-            if ((XF16 && fcsr_q.fmode.dst == 1'b0) ||
+            if ((Zfh && fcsr_q.fmode.dst == 1'b0) ||
                (XF16ALT && fcsr_q.fmode.dst == 1'b1)) begin
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
@@ -2076,7 +2094,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       VFCVT_B_B,
       VFCVTU_B_B: begin
-        if (FP_EN && XFVEC && RVF && XF8 && XF8ALT && FLEN >= 16) begin
+        if (NativeFpSupport && XFVEC && RVF && XF8 && XF8ALT && FLEN >= 16) begin
           if (fcsr_q.fmode.src != fcsr_q.fmode.dst) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -2093,10 +2111,10 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFNDOTPEX_H_R_B,
       VFSUMEX_H_B,
       VFNSUMEX_H_B: begin
-        if (FP_EN && XFVEC && FLEN >= 32 && XFDOTP) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 32 && XFDOTP) begin
           if ((XF8 && fcsr_q.fmode.src == 1'b0) ||
              (XF8ALT && fcsr_q.fmode.src == 1'b1)) begin
-            if ((XF16 && fcsr_q.fmode.dst == 1'b0) ||
+            if ((Zfh && fcsr_q.fmode.dst == 1'b0) ||
                (XF16ALT && fcsr_q.fmode.dst == 1'b1)) begin
               write_rd = 1'b0;
               is_acc_inst = 1'b1;
@@ -2118,7 +2136,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FCLASS_D,
       FCVT_W_D,
       FCVT_WU_D: begin
-        if (FP_EN && RVD) begin
+        if (NativeFpSupport && RVD) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
@@ -2135,7 +2153,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FCVT_W_S,
       FCVT_WU_S,
       FMV_X_W: begin
-        if (FP_EN && RVF) begin
+        if (NativeFpSupport && RVF) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
@@ -2158,7 +2176,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFGT_S,
       VFGT_R_S,
       VFCLASS_S: begin
-        if (FP_EN && XFVEC && RVF && FLEN >= 64) begin
+        if (NativeFpSupport && XFVEC && RVF && FLEN >= 64) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
@@ -2175,12 +2193,12 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FCVT_W_H,
       FCVT_WU_H,
       FMV_X_H: begin
-        if (FP_EN && XF16 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && Zfh && fcsr_q.fmode.src == 1'b0) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
-        end else if (FP_EN && XF16ALT && fcsr_q.fmode.src == 1'b1) begin
+        end else if (NativeFpSupport && XF16ALT && fcsr_q.fmode.src == 1'b1) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
@@ -2203,8 +2221,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFGT_H,
       VFGT_R_H,
       VFCLASS_H: begin
-        if (FP_EN && XFVEC && FLEN >= 32) begin
-          if (XF16 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 32) begin
+          if (Zfh && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             uses_rd = 1'b1;
             is_acc_inst = 1'b1;
@@ -2222,8 +2240,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFMV_X_H,
       VFCVT_X_H,
       VFCVT_XU_H: begin
-        if (FP_EN && XFVEC && FLEN >= 32 && ~RVD) begin
-          if (XF16 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 32 && ~RVD) begin
+          if (Zfh && fcsr_q.fmode.src == 1'b0) begin
             write_rd = 1'b0;
             uses_rd = 1'b1;
             is_acc_inst = 1'b1;
@@ -2246,12 +2264,12 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FCVT_W_B,
       FCVT_WU_B,
       FMV_X_B: begin
-        if (FP_EN && XF8 && fcsr_q.fmode.src == 1'b0) begin
+        if (NativeFpSupport && XF8 && fcsr_q.fmode.src == 1'b0) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
           acc_register_rd = 1'b1; // No RS in GPR but RD in GPR, register in int scoreboard
-        end else if (FP_EN && XF8ALT && fcsr_q.fmode.src == 1'b1) begin
+        end else if (NativeFpSupport && XF8ALT && fcsr_q.fmode.src == 1'b1) begin
           write_rd = 1'b0;
           uses_rd = 1'b1;
           is_acc_inst = 1'b1;
@@ -2273,7 +2291,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFLE_R_B,
       VFGT_B,
       VFGT_R_B: begin
-        if (FP_EN && XFVEC && FLEN >= 16) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 16) begin
           if (XF8 && fcsr_q.fmode.src == 1'b0) begin
             write_rd = 1'b0;
             uses_rd = 1'b1;
@@ -2293,7 +2311,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFCLASS_B,
       VFCVT_X_B,
       VFCVT_XU_B: begin
-        if (FP_EN && XFVEC && FLEN >= 16 && ~RVD) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 16 && ~RVD) begin
           if (XF8 && fcsr_q.fmode.src == 1'b0) begin
             write_rd = 1'b0;
             uses_rd = 1'b1;
@@ -2313,7 +2331,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       // Double Precision Floating-Point
       FCVT_D_W,
       FCVT_D_WU: begin
-        if (FP_EN && RVD) begin
+        if (NativeFpSupport && RVD) begin
           opa_select = RegRs1;
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -2325,7 +2343,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMV_W_X,
       FCVT_S_W,
       FCVT_S_WU: begin
-        if (FP_EN && RVF) begin
+        if (NativeFpSupport && RVF) begin
           opa_select = RegRs1;
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -2337,11 +2355,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMV_H_X,
       FCVT_H_W,
       FCVT_H_WU: begin
-        if (FP_EN && XF16 && (fcsr_q.fmode.dst == 1'b0)) begin
+        if (NativeFpSupport && Zfh && (fcsr_q.fmode.dst == 1'b0)) begin
           opa_select = RegRs1;
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && XF16ALT && (fcsr_q.fmode.dst == 1'b1)) begin
+        end else if (NativeFpSupport && XF16ALT && (fcsr_q.fmode.dst == 1'b1)) begin
           opa_select = RegRs1;
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -2353,8 +2371,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFMV_H_X,
       VFCVT_H_X,
       VFCVT_H_XU: begin
-        if (FP_EN && XFVEC && FLEN >= 32 && ~RVD) begin
-          if (XF16 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 32 && ~RVD) begin
+          if (Zfh && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
           end else if (XF16ALT && fcsr_q.fmode.dst == 1'b1) begin
@@ -2369,11 +2387,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       FMV_B_X,
       FCVT_B_W,
       FCVT_B_WU: begin
-        if (FP_EN && XF8 && fcsr_q.fmode.dst == 1'b0) begin
+        if (NativeFpSupport && XF8 && fcsr_q.fmode.dst == 1'b0) begin
           opa_select = RegRs1;
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
-        end else if (FP_EN && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
+        end else if (NativeFpSupport && XF8ALT && fcsr_q.fmode.dst == 1'b1) begin
           opa_select = RegRs1;
           write_rd = 1'b0;
           is_acc_inst = 1'b1;
@@ -2385,7 +2403,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       VFMV_B_X,
       VFCVT_B_X,
       VFCVT_B_XU: begin
-        if (FP_EN && XFVEC && FLEN >= 16 && ~RVD) begin
+        if (NativeFpSupport && XFVEC && FLEN >= 16 && ~RVD) begin
           if (XF8 && fcsr_q.fmode.dst == 1'b0) begin
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -2457,7 +2475,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             end
           endcase
         end else begin
-          if (Xfrep && FP_EN && (inst_rsp_i.data ==? FREP_O)) begin
+          if (Xfrep && (inst_rsp_i.data ==? FREP_O)) begin
             opa_select = RegRs1;
             write_rd = 1'b0;
             is_acc_inst = 1'b1;
@@ -2675,7 +2693,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       // Floating-Point Load/Store
       // Single Precision Floating-Point
       FLW: begin
-        if (FP_EN && RVF) begin
+        if (NativeFpSupport && RVF) begin
           opa_select = RegRs1;
           opb_select = IImmediate;
           write_rd = 1'b0;
@@ -2687,7 +2705,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FSW: begin
-        if (FP_EN && RVF) begin
+        if (NativeFpSupport && RVF) begin
           opa_select = RegRs1;
           opb_select = SFImmediate;
           write_rd = 1'b0;
@@ -2700,7 +2718,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       // Double Precision Floating-Point
       FLD: begin
-        if (FP_EN && (RVD || XFVEC)) begin
+        if (NativeFpSupport && (RVD || XFVEC)) begin
           opa_select = RegRs1;
           opb_select = IImmediate;
           write_rd = 1'b0;
@@ -2712,7 +2730,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FSD: begin
-        if (FP_EN && (RVD || XFVEC)) begin
+        if (NativeFpSupport && (RVD || XFVEC)) begin
           opa_select = RegRs1;
           opb_select = SFImmediate;
           write_rd = 1'b0;
@@ -2725,7 +2743,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       // Half Precision Floating-Point
       FLH: begin
-        if (FP_EN && (XF16 || XF16ALT)) begin
+        if (NativeFpSupport && (Zfh || XF16ALT)) begin
           opa_select = RegRs1;
           opb_select = IImmediate;
           write_rd = 1'b0;
@@ -2737,7 +2755,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FSH: begin
-        if (FP_EN && (XF16 || XF16ALT)) begin
+        if (NativeFpSupport && (Zfh || XF16ALT)) begin
           opa_select = RegRs1;
           opb_select = SFImmediate;
           write_rd = 1'b0;
@@ -2750,7 +2768,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
       // Quarter Precision Floating-Point
       FLB: begin
-        if (FP_EN && (XF8 || XF8ALT)) begin
+        if (NativeFpSupport && (XF8 || XF8ALT)) begin
           opa_select = RegRs1;
           opb_select = IImmediate;
           write_rd = 1'b0;
@@ -2762,7 +2780,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end
       end
       FSB: begin
-        if (FP_EN && (XF8 || XF8ALT)) begin
+        if (NativeFpSupport && (XF8 || XF8ALT)) begin
           opa_select = RegRs1;
           opb_select = SFImmediate;
           write_rd = 1'b0;
@@ -2873,7 +2891,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
             end
             FCVT_D_W_COPIFT,
             FCVT_D_WU_COPIFT: begin
-              if (FP_EN && RVD && Xcopift) begin
+              if (NativeFpSupport && RVD && Xcopift) begin
                 write_rd = 1'b0;
                 is_acc_inst = 1'b1;
               end else begin
@@ -2904,7 +2922,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
         end else begin
           unique casez (inst_rsp_i.data)
             SCFGRI, FLT_D_COPIFT: begin
-              if (FP_EN && RVD && Xcopift) begin
+              if (NativeFpSupport && RVD && Xcopift) begin
                 write_rd = 1'b0;
                 is_acc_inst = 1'b1;
               end else if (Xssr) begin
@@ -2998,6 +3016,15 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     if (unsupported_inst) begin
       if (EnableXif) begin
         write_rd = x_issue_ready_i & x_issue_valid_o & x_issue_resp_i.writeback;
+        // For XIF non-writeback instructions (e.g. FP ops whose destination lives
+        // in the coprocessor's own register file), rd in the encoding does NOT map
+        // to Snitch's integer register file.  Setting uses_rd=1 (the default) would
+        // cause dst_ready to check sb_q[rd], which can be spuriously set by a
+        // preceding integer-writeback XIF instruction that happens to share the same
+        // register number (e.g. feq.d a5 sets sb_q[15] while fld fa5 also has
+        // rd=15).  Only gate on the integer scoreboard when the result will actually
+        // be written back to Snitch's GPR.
+        uses_rd = x_issue_resp_i.writeback;
 
         opa_select = RegRs1;
         opb_select = RegRs2;
@@ -3154,11 +3181,11 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
                               // C - Compressed extension
                               | (0   <<  2)
                               // D - Double precsision floating-point extension
-                              | ((FP_EN & RVD) <<  3)
+                              | (RVD <<  3)
                               // E - RV32E base ISA
-                              | ((FP_EN & RVE) <<  4)
+                              | (RVE <<  4)
                               // F - Single precsision floating-point extension
-                              | ((FP_EN & RVF) <<  5)
+                              | (RVF <<  5)
                               // I - RV32I/64I/128I base ISA
                               | (1   <<  8)
                               // M - Integer Multiply/Divide extension
@@ -3169,8 +3196,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
                               | (0   << 18)
                               // U - User mode implemented
                               | (0   << 20)
-                              // X - Non-standard extensions present
-                              | (((NSX & FP_EN) | Xdma | Xssr) << 23)
+                              // X - Non-ratified extensions present
+                              | (NonRatifiedExtensions << 23)
                               // RV32
                               | (1   << 30);
           CSR_MHARTID: begin
@@ -3217,7 +3244,7 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           CSR_MSTATUS: begin
             automatic snitch_pkg::status_rv32_t mstatus, mstatus_d;
             mstatus = '0;
-            if (FP_EN) begin
+            if (FpEn) begin
               mstatus.fs = snitch_pkg::XDirty;
               mstatus.sd = 1'b1;
             end
@@ -3324,25 +3351,25 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
           end
           // F/D Extension
           CSR_FFLAGS: begin
-            if (FP_EN) begin
+            if (FpEn) begin
               csr_rvalue = {27'b0, fcsr_q.fflags};
               if (!exception) fcsr_d.fflags = fpnew_pkg::status_t'(alu_result[4:0]);
             end else illegal_csr = 1'b1;
           end
           CSR_FRM: begin
-            if (FP_EN) begin
+            if (FpEn) begin
               csr_rvalue = {29'b0, fcsr_q.frm};
               if (!exception) fcsr_d.frm = fpnew_pkg::roundmode_e'(alu_result[2:0]);
             end else illegal_csr = 1'b1;
           end
           CSR_FMODE: begin
-            if (FP_EN) begin
+            if (FpEn) begin
               csr_rvalue = {30'b0, fcsr_q.fmode};
               if (!exception) fcsr_d.fmode = fpnew_pkg::fmt_mode_t'(alu_result[1:0]);
             end else illegal_csr = 1'b1;
           end
           CSR_FCSR: begin
-            if (FP_EN) begin
+            if (FpEn) begin
               csr_rvalue = {22'b0, fcsr_q};
               if (!exception) fcsr_d = fcsr_t'(alu_result[9:0]);
             end else illegal_csr = 1'b1;
@@ -3435,14 +3462,14 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
       end
 
       // Return from Environment.
-      if (inst_rsp_i.data == riscv_instr::MRET) begin
+      if (inst_rsp_i.data == snitch_riscv_instr::MRET) begin
         priv_lvl_d = mpp_q;
         ie_d[M] = pie_q[M];
         pie_d[M] = 1'b1;
         mpp_d = snitch_pkg::PrivLvlU; // set default back to U-Mode
       end
 
-      if (inst_rsp_i.data == riscv_instr::SRET) begin
+      if (inst_rsp_i.data == snitch_riscv_instr::SRET) begin
         priv_lvl_d = snitch_pkg::priv_lvl_t'({1'b0, spp_q});
         spp_d = 1'b0;
       end
@@ -3471,6 +3498,43 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
                $time, inst_rsp_i.data[31:20], alu_result, alu_result, $bitstoshortreal(alu_result));
     end
   end
+  // pragma translate_on
+
+  // pragma translate_off
+  assign trace_o.pc_q                = pc_q;
+  assign trace_o.priv_lvl_q          = priv_lvl_q;
+  assign trace_o.instr               = inst_rsp_i.data;
+  assign trace_o.extras.source       = snitch_pkg::SrcSnitch;
+  assign trace_o.extras.stall        = stall;
+  assign trace_o.extras.exception    = exception;
+  assign trace_o.extras.rs1          = rs1;
+  assign trace_o.extras.rs2          = rs2;
+  assign trace_o.extras.rd           = rd;
+  assign trace_o.extras.is_load      = is_load;
+  assign trace_o.extras.is_store     = is_store;
+  assign trace_o.extras.is_branch    = is_branch;
+  assign trace_o.extras.pc_d         = pc_d;
+  assign trace_o.extras.opa          = opa;
+  assign trace_o.extras.opb          = opb;
+  assign trace_o.extras.opa_select   = opa_select;
+  assign trace_o.extras.opb_select   = opb_select;
+  assign trace_o.extras.opc_select   = opc_select;
+  assign trace_o.extras.write_rd     = write_rd;
+  assign trace_o.extras.csr_addr     = inst_rsp_i.data[31:20];
+  assign trace_o.extras.writeback    = gpr_wdata[0];
+  assign trace_o.extras.gpr_rdata_1  = gpr_rdata[1];
+  assign trace_o.extras.ls_size      = ls_size;
+  assign trace_o.extras.ld_result_32 = ld_result[31:0];
+  assign trace_o.extras.lsu_rd       = lsu_rd;
+  assign trace_o.extras.retire_load  = retire_load;
+  assign trace_o.extras.alu_result   = alu_result;
+  assign trace_o.extras.ls_amo       = ls_amo;
+  assign trace_o.extras.retire_acc   = retire_acc;
+  assign trace_o.extras.acc_pid      = acc_rsp_i.p.id;
+  assign trace_o.extras.acc_pdata_32 = acc_rsp_i.p.data[31:0];
+  assign trace_o.extras.fpu_offload  = acc_rsp_i.q_ready && acc_req_o.q_valid &&
+                                       acc_req_o.q.addr == FP_SS;
+  assign trace_o.extras.is_seq_insn  = inst_rsp_i.data ==? FREP_O;
   // pragma translate_on
 
   // --------------------
@@ -3754,16 +3818,14 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
   // Do *not* issue request when a non-accelerator (CAQ-unrelated) stall is blocking progress.
   assign caq_qvalid = caq_ena & acc_rsp_i.q_ready & ~nonacc_stall;
 
-  snitch_lsu #(
+  lsu #(
     .AddrWidth (AddrWidth),
     .DataWidth (DataWidth),
-    .UserWidth (64),
-    .dreq_t (dreq_t),
-    .drsp_t (drsp_t),
+    .UserWidth (UserWidth),
     .tag_t (logic[RegWidth-1:0]),
     .NumOutstandingMem (NumIntOutstandingMem),
     .NumOutstandingLoads (NumIntOutstandingLoads),
-    .Caq (FP_EN),
+    .Caq (1'b1),
     .CaqDepth (CaqDepth),
     .CaqTagWidth (CaqTagWidth),
     .CaqRespTrackSeq (1'b0)
@@ -3794,8 +3856,8 @@ module snitch import snitch_pkg::*; import riscv_instr::*; #(
     .caq_pvalid_i,
     .caq_pvalid_o ( ),
     .caq_empty_o (caq_empty),
-    .data_req_o,
-    .data_rsp_i
+    .data_req_o (lsu_req_o),
+    .data_rsp_i (lsu_rsp_i)
   );
 
   assign lsu_tlb_qvalid = valid_instr & (is_load | is_store)

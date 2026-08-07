@@ -37,13 +37,19 @@ jobs:
         # commit on this branch: CI doesn't necessarily run on every push
         # (e.g. superseded runs get cancelled), so a plain previous-commit
         # diff could silently skip over a real prerequisite change.
+        #
+        # On forks, `origin` is the fork itself, whose `main` can lag behind
+        # the upstream repo it was forked from, so we always fetch
+        # `main` from the canonical upstream repo instead of `origin`.
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
-            echo "sha=${{ github.event.before }}" >> "$GITHUB_OUTPUT"
+            sha="${{ github.event.before }}"
           else
-            git fetch origin main
-            echo "sha=$(git merge-base origin/main HEAD)" >> "$GITHUB_OUTPUT"
+            git fetch https://github.com/pulp-platform/snitch_cluster.git main
+            sha="$(git merge-base FETCH_HEAD HEAD)"
           fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Base SHA: $sha"
 
   ##########################
   # Build Docker Container #
@@ -118,7 +124,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Build docs
         run: make docs
 
@@ -133,7 +139,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
+      # For some reason, the checkout is done by a different user
+      # than that deploying to Github (root, possibly due to Docker).
+      # So we need to set the repository as a safe directory.
+      - name: Git config safe.directory
+        run: |
+          git config --global --add safe.directory $GITHUB_WORKSPACE
       - name: Generate documentation sources
         run: |
           make doc-srcs
@@ -155,7 +167,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Run pytest
         run: pytest
 
@@ -173,7 +185,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Hash Verilator prerequisites
         id: list-make-prerequisites
         uses: colluca/list-make-prerequisites@v1.0.0
@@ -203,7 +215,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Build Software
         run: |
           make sw -j
@@ -238,7 +250,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Hash Verilator prerequisites
         id: list-make-prerequisites
         uses: colluca/list-make-prerequisites@v1.0.0
@@ -260,7 +272,7 @@ jobs:
           make CFG_OVERRIDE=cfg/mempool.json verilator
       - name: Build Software for mempool tests
         run: |
-          make sw CFG_OVERRIDE=cfg/mempool.json SN_MCPU=snitch-mempool -j
+          make sw CFG_OVERRIDE=cfg/mempool.json -j
       - name: Run Tests
         run: |
           cd test
@@ -270,7 +282,54 @@ jobs:
         # testbench does not wait until all the instructions are retired
         # (compiler introduces few instructions after exit routine).
         run: |
-          make SIM_DIR=./test/runs/simple SN_MCPU=snitch-mempool DEBUG=ON annotate -j
+          make SIM_DIR=./test/runs/simple DEBUG=ON annotate -j
+
+  ######################################################
+  # Simulate SW on Snitch Cluster (Spatz) w/ Verilator #
+  ######################################################
+
+  snitch-spatz-cluster-vlt:
+    name: Build and Simulate Spatz Snitch Cluster w/ Verilator
+    runs-on: ubuntu-22.04
+    needs: [docker-meta, build-hw-image]
+    container:
+      image: ${{ needs.docker-meta.outputs.hw_image_name }}
+      volumes:
+        - ${{ github.workspace }}:/repo
+    defaults:
+      run:
+        working-directory: /repo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+      - uses: ./.github/actions/setup-container
+      - name: Hash Verilator prerequisites
+        id: list-make-prerequisites
+        uses: colluca/list-make-prerequisites@v1.0.0
+        with:
+          target: verilator
+          flags: --recursive
+      - name: Set up cache for Verilator build
+        id: verilator-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            /repo/target/sim/build/bin
+          key: verilator-spatz-${{ steps.list-make-prerequisites.outputs.hash }}
+          restore-keys: |
+            verilator-spatz-
+      - name: Build Hardware
+        if: steps.verilator-cache.outputs.cache-hit != 'true'
+        run: |
+          make CFG_OVERRIDE=cfg/spatz.json verilator
+      - name: Build Software
+        run: |
+          make CFG_OVERRIDE=cfg/spatz.json sw -j
+      - name: Run Tests
+        run: |
+          cd test
+          ../util/experiments/run.py spatz.yaml --simulator verilator -j
 
   #############
   # Synthesis #
@@ -292,10 +351,10 @@ jobs:
         with:
           submodules: 'recursive'
           fetch-depth: 0
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Check if Yosys prerequisites changed
         id: make-prerequisites-changed
-        uses: colluca/make-prerequisites-changed@v1.1.1
+        uses: colluca/make-prerequisites-changed@v1.2.0
         with:
           target: yosys
           flags: --recursive
@@ -304,6 +363,15 @@ jobs:
         if: steps.make-prerequisites-changed.outputs.changed == 'true'
         run: |
           make CFG_OVERRIDE=cfg/yosys-ci.json yosys
+      - name: Upload Yosys logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: yosys-synthesis-logs
+          path: |
+            target/asic/yosys/*.log
+            target/asic/yosys/reports/
+          if-no-files-found: warn
 
   ######################
   # Sources Up-to-Date #
@@ -324,7 +392,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-python
+      - uses: ./.github/actions/setup-container
       - name: Generate opcodes
         run: |
           ./util/clustergen/generate-opcodes.sh

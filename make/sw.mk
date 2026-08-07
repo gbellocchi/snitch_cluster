@@ -4,6 +4,10 @@
 #
 # Luca Colagrande <colluca@iis.ee.ethz.ch>
 
+# Software build is dependent on toolchain.mk and must thus be deferred
+# after the toolchain.mk file is included and read.
+ifdef SN_TOOLCHAIN_MK_READ
+
 ###################
 # General targets #
 ###################
@@ -64,7 +68,6 @@ sn-clean-headers:
 # Subdirectories #
 ##################
 
-include $(SN_ROOT)/sw/toolchain.mk
 include $(SN_ROOT)/sw/runtime/runtime.mk
 include $(SN_ROOT)/sw/tests/tests.mk
 include $(SN_ROOT)/sw/riscv-tests/riscv-tests.mk
@@ -77,6 +80,8 @@ SN_APPS += $(SN_ROOT)/sw/kernels/blas/gemm
 SN_APPS += $(SN_ROOT)/sw/kernels/blas/gemv
 SN_APPS += $(SN_ROOT)/sw/kernels/blas/dot
 SN_APPS += $(SN_ROOT)/sw/kernels/blas/syrk
+SN_APPS += $(SN_ROOT)/sw/kernels/blas/spatz-axpy
+SN_APPS += $(SN_ROOT)/sw/kernels/blas/spatz-fmatmul
 SN_APPS += $(SN_ROOT)/sw/kernels/dnn/batchnorm
 # SN_APPS += $(SN_ROOT)/sw/kernels/dnn/conv2d
 # SN_APPS += $(SN_ROOT)/sw/kernels/dnn/fusedconv
@@ -107,3 +112,5 @@ endif
 $(foreach app,$(SN_APPS), \
 	$(eval include $(app)/app.mk) \
 )
+
+endif

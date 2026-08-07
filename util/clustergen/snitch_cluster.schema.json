@@ -160,7 +160,7 @@
                 },
                 "atomic_id_width": {
                     "type": "number",
-                    "description": "Width of the cluster's atomic ID.",
+                    "description": "Width of the cluster's atomic ID. Should be set to clog2(num_atomic_masters + 1); atomic ID 0 is reserved for non-atomic masters. All cores in a cluster use the same atomic ID.",
                     "default": 1
                 },
                 "collective_width": {
@@ -542,10 +542,10 @@
                                             "description": "Enable Smallfloat Xf8alt extension.",
                                             "default": false
                                         },
-                                        "xf16": {
+                                        "zfh": {
                                             "type": "boolean",
-                                            "title": "Xf16 16-bit Float Extension",
-                                            "description": "Enable Smallfloat Xf16 extension (IEEE 16-bit float).",
+                                            "title": "Zfh 16-bit Float Extension",
+                                            "description": "Enable Zfh extension (IEEE 16-bit float).",
                                             "default": false
                                         },
                                         "xf16alt": {
@@ -688,7 +688,7 @@
                                                 "type": "number"
                                             }
                                         },
-                                        "ssr_mux_resp_depth": {
+                                        "ssr_mux_rsp_depth": {
                                             "type": "number",
                                             "description": "Depth of response buffer in the TCDM multiplexer arbitrating between core and SSR 0.",
                                             "default": 4
@@ -784,6 +784,72 @@
                                                         "maximum": 32,
                                                         "default": 4
                                                     }
+                                                }
+                                            }
+                                        },
+                                        "spatz": {
+                                            "type": "object",
+                                            "title": "Spatz configuration",
+                                            "description": "Configuration of the Spatz VPU.",
+                                            "default": {},
+                                            "properties": {
+                                                "num_outstanding_loads": {
+                                                    "type": "number",
+                                                    "description": "Number of outstanding loads. Determines the buffer size in Spatz' LSU.",
+                                                    "default": 1
+                                                },
+                                                "n_ipu": {
+                                                    "type": "number",
+                                                    "description": "Number of integer processing units.",
+                                                    "minimum": 1,
+                                                    "default": 1
+                                                },
+                                                "n_fpu": {
+                                                    "type": "number",
+                                                    "description": "Number of floating-point processing units.",
+                                                    "minimum": 1,
+                                                    "default": 8
+                                                },
+                                                "vlen": {
+                                                    "type": "number",
+                                                    "description": "Vector length.",
+                                                    "default": 512
+                                                },
+                                                "spatz_nports": {
+                                                    "type": "number",
+                                                    "description": "Number of ports for the Spatz VPU.",
+                                                    "minimum": 1,
+                                                    "default": 8
+                                                },
+                                                "double_bw": {
+                                                    "type": "boolean",
+                                                    "description": "Whether to use double bandwidth.",
+                                                    "default": false
+                                                },
+                                                "spatz_fpu": {
+                                                    "type": "boolean",
+                                                    "description": "Whether to include the Spatz FPU.",
+                                                    "default": true
+                                                },
+                                                "mempool": {
+                                                    "type": "boolean",
+                                                    "description": "Whether to use the mempool configuration.",
+                                                    "default": false
+                                                },
+                                                "buf_fpu": {
+                                                    "type": "number",
+                                                    "description": "Number of buffers for the FPU.",
+                                                    "default": 1
+                                                },
+                                                "rvf": {
+                                                    "type": "boolean",
+                                                    "description": "Whether to include the RVF extension.",
+                                                    "default": true
+                                                },
+                                                "rvd": {
+                                                    "type": "boolean",
+                                                    "description": "Whether to include the RVD extension.",
+                                                    "default": true
                                                 }
                                             }
                                         }

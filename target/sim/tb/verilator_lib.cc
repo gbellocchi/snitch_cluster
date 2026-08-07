@@ -4,12 +4,16 @@
 
 #include <stdio.h>
 
+#include <cstdlib>
+
 #include "Vtestharness.h"
 #include "Vtestharness__Dpi.h"
 #include "sim.hh"
 #include "tb_lib.hh"
 #include "verilated.h"
-#include "verilated_vcd_c.h"
+#if VM_TRACE_FST
+#include "verilated_fst_c.h"
+#endif
 
 std::unique_ptr<sim::Sim> s;
 
@@ -27,14 +31,34 @@ void sim_thread_main(void *arg) { ((Sim *)arg)->main(); }
 // Sim time.
 vluint64_t TIME = 0;
 
+#if VM_TRACE_FST
+// The "target" fiber (running `Sim::main()`'s eval/dump loop) can be
+// abandoned mid-loop: if no `--ipc` host is attached, `Sim::run()` returns as
+// soon as `htif_t::run()` does, without resuming the target fiber again, so
+// it never reaches its own post-loop cleanup below (only reachable once the
+// loop itself sees `Verilated::gotFinish()`). That drops any FST data not
+// yet flushed on a failing test, exactly the run we most want a usable
+// waveform for. Register a process-exit hook so the trace gets closed
+// regardless of which path terminates the process.
+VerilatedFstC *g_fst = nullptr;
+void close_fst_at_exit() {
+    if (g_fst != nullptr) {
+        g_fst->close();
+        g_fst = nullptr;
+    }
+}
+#endif
+
 Sim::Sim(int argc, char **argv) : htif_t(argc, argv), ipc(argc, argv) {
-    // Search arguments for `--vcd` flag and enable waves if requested
+#if VM_TRACE_FST
+    // Search arguments for `--fst` flag and enable waves if requested
     for (auto i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--vcd") == 0) {
-            printf("VCD wave generation enabled\n");
-            vlt_vcd = true;
+        if (strcmp(argv[i], "--fst") == 0) {
+            printf("FST wave generation enabled\n");
+            vlt_fst = true;
         }
     }
+#endif
     Verilated::commandArgs(argc, argv);
 }
 
@@ -63,22 +87,29 @@ int Sim::run() {
 void Sim::main() {
     // Initialize verilator environment.
     Verilated::traceEverOn(true);
-    // Allocate the simulation state and VCD trace.
+    // Allocate the simulation state.
     auto top = std::make_unique<Vtestharness>();
-    auto vcd = std::make_unique<VerilatedVcdC>();
+#if VM_TRACE_FST
+    // Allocate the FST trace.
+    auto fst = std::make_unique<VerilatedFstC>();
 
     // Trace 8 levels of hierarchy.
-    if (vlt_vcd) {
-        top->trace(vcd.get(), 8);
-        vcd->open("sim.vcd");
-        vcd->dump(TIME);
+    if (vlt_fst) {
+        top->trace(fst.get(), 8);
+        fst->open("sim.fst");
+        fst->dump(TIME);
+        g_fst = fst.get();
+        std::atexit(close_fst_at_exit);
     }
+#endif
     TIME += 2;
 
     while (!Verilated::gotFinish()) {
         // Evaluate the DUT.
         top->eval();
-        if (vlt_vcd) vcd->dump(TIME);
+#if VM_TRACE_FST
+        if (vlt_fst) fst->dump(TIME);
+#endif
         // Increase global time.
         TIME++;
         // Switch to the HTIF interface in regular intervals.
@@ -87,8 +118,11 @@ void Sim::main() {
         }
     }
 
-    // Clean up.
-    if (vlt_vcd) vcd->close();
+#if VM_TRACE_FST
+    // Clean up. (`close_fst_at_exit` guards against a second close() if this
+    // path is reached normally, by clearing `g_fst` once closed here.)
+    if (vlt_fst) close_fst_at_exit();
+#endif
 }
 }  // namespace sim
 

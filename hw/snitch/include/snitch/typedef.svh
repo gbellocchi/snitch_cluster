@@ -8,33 +8,7 @@
 `define SNITCH_TYPEDEF_SVH_
 
 `include "reqrsp_interface/typedef.svh"
-
-////////////////////
-// Data interface //
-////////////////////
-
-`define SNITCH_DATA_REQ_CHAN_STRUCT(__data_width, __addr_width) \
-  struct packed {                                               \
-    logic [``__addr_width``-1:0]   addr;                        \
-    logic                          write;                       \
-    snitch_pkg::amo_op_e           amo;                         \
-    logic [``__data_width``-1:0]   data;                        \
-    logic [``__data_width``/8-1:0] strb;                        \
-    logic [63:0]                   user;                        \
-    snitch_pkg::size_t             size;                        \
-  }
-
-`define SNITCH_DATA_RSP_CHAN_STRUCT(__data_width) \
-  struct packed {                                 \
-    logic [``__data_width``-1:0] data;            \
-    logic                        error;           \
-  }
-
-`define SNITCH_DATA_REQ_STRUCT(__data_width, __addr_width) \
-  `GENERIC_REQRSP_REQ_STRUCT(`SNITCH_DATA_REQ_CHAN_STRUCT(__data_width, __addr_width))
-
-`define SNITCH_DATA_RSP_STRUCT(__data_width) \
-  `GENERIC_REQRSP_RSP_STRUCT(`SNITCH_DATA_RSP_CHAN_STRUCT(__data_width))
+`include "lsu_interface/typedef.svh"
 
 ///////////////////////////
 // Accelerator interface //
@@ -58,10 +32,10 @@
   }
 
 `define SNITCH_ACC_REQ_STRUCT(__data_width, __addr_width) \
-  `GENERIC_REQRSP_REQ_STRUCT(`SNITCH_ACC_REQ_CHAN_STRUCT(__data_width, __addr_width))
+  `REQRSP_REQ_STRUCT(`SNITCH_ACC_REQ_CHAN_STRUCT(__data_width, __addr_width))
 
 `define SNITCH_ACC_RSP_STRUCT(__data_width) \
-  `GENERIC_REQRSP_RSP_STRUCT(`SNITCH_ACC_RSP_CHAN_STRUCT(__data_width))
+  `REQRSP_RSP_STRUCT(`SNITCH_ACC_RSP_CHAN_STRUCT(__data_width))
 
 `define SNITCH_ACC_TYPEDEF_REQ_CHAN_T(__data_width, __addr_width) \
   typedef `SNITCH_ACC_REQ_CHAN_STRUCT(__data_width, __addr_width) acc_req_chan_t;
@@ -75,7 +49,7 @@
 
 `define SNITCH_ACC_TYPEDEF_ALL(__data_width, __addr_width) \
   `SNITCH_ACC_TYPEDEF_REQRSP_CHAN_ALL(__data_width, __addr_width) \
-  `GENERIC_REQRSP_TYPEDEF_ALL(acc, acc_req_chan_t, acc_rsp_chan_t)
+  `REQRSP_TYPEDEF_ALL(acc, acc_req_chan_t, acc_rsp_chan_t)
 
 ///////////////////////////
 // Instruction interface //

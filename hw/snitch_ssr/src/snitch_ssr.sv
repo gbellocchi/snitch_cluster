@@ -125,13 +125,11 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
 
   if (Cfg.Indirection) begin : gen_demux
     tcdm_mux #(
-      .NrPorts    ( 2             ),
-      .AddrWidth  ( AddrWidth     ),
-      .DataWidth  ( DataWidth     ),
-      .UserWidth  ( UserWidth     ),
-      .RespDepth  ( Cfg.MuxRespDepth  ),
-      .tcdm_req_t ( tcdm_req_t    ),
-      .tcdm_rsp_t ( tcdm_rsp_t    )
+      .NrPorts   ( 2               ),
+      .RspDepth  ( Cfg.MuxRspDepth ),
+      .AddrWidth ( AddrWidth       ),
+      .DataWidth ( DataWidth       ),
+      .UserWidth ( UserWidth       )
     ) i_tcdm_mux (
       .clk_i,
       .rst_ni,
@@ -148,7 +146,7 @@ module snitch_ssr import snitch_ssr_pkg::*; #(
   end
 
   assign data_req.q_valid = data_req_qvalid;
-  assign data_req.q.amo = snitch_pkg::AMONone;
+  assign data_req.q.amo = lsu_pkg::AMONone;
   assign data_req.q.user = '0;
 
   assign lane_rdata_o = lane_zero ? '0 : fifo_out;

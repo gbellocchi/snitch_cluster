@@ -94,7 +94,7 @@ module mem_wide_narrow_mux #(
         out_req_o[i].q = '{
           addr: in_wide_req_i.q.addr,
           write: in_wide_req_i.q.write,
-          amo: snitch_pkg::AMONone,
+          amo: lsu_pkg::AMONone,
           data: in_wide_req_i.q.data[i*NarrowDataWidth+:NarrowDataWidth],
           strb: in_wide_req_i.q.strb[i*NarrowStrbWidth+:NarrowStrbWidth],
           user: in_wide_req_i.q.user
@@ -111,7 +111,7 @@ module mem_wide_narrow_mux #(
         out_req_o[i].q = '{
           addr: in_ext_req_i.q.addr,
           write: in_ext_req_i.q.write,
-          amo: snitch_pkg::AMONone,
+          amo: lsu_pkg::AMONone,
           data: in_ext_req_i.q.data[i*NarrowDataWidth+:NarrowDataWidth],
           strb: in_ext_req_i.q.strb[i*NarrowStrbWidth+:NarrowStrbWidth],
           user: in_ext_req_i.q.user
@@ -225,15 +225,15 @@ module mem_wide_narrow_mux_intf #(
 
   for (genvar i = 0; i < NrPorts; i++) begin : gen_interface_assign
     `MEM_ASSIGN_TO_REQ(in_narrow_req[i], in_narrow[i])
-    `MEM_ASSIGN_FROM_RESP(in_narrow[i], in_narrow_rsp[i])
+    `MEM_ASSIGN_FROM_RSP(in_narrow[i], in_narrow_rsp[i])
     `MEM_ASSIGN_FROM_REQ(out[i], out_req[i])
-    `MEM_ASSIGN_TO_RESP(out_rsp[i], out[i])
+    `MEM_ASSIGN_TO_RSP(out_rsp[i], out[i])
   end
 
   `MEM_ASSIGN_TO_REQ(in_wide_req, in_wide)
-  `MEM_ASSIGN_FROM_RESP(in_wide, in_wide_rsp)
+  `MEM_ASSIGN_FROM_RSP(in_wide, in_wide_rsp)
 
   `MEM_ASSIGN_TO_REQ(in_ext_req, in_ext)
-  `MEM_ASSIGN_FROM_RESP(in_ext, in_ext_rsp)
+  `MEM_ASSIGN_FROM_RSP(in_ext, in_ext_rsp)
 
 endmodule

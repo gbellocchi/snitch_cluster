@@ -4,6 +4,7 @@
 
 variables:
   GIT_STRATEGY: clone
+  GIT_DEPTH: 0
   # Enable colors in CI terminal
   TERM: ansi
   FORCE_COLOR: 1
@@ -108,12 +109,9 @@ snitch-ip-tests:
           - snitch_cluster
           - tcdm_interface
           - snitch_ssr
-          - reqrsp_interface
   script:
     - make rtl -j
-    - cd hw/$IP
-    - ./util/compile.sh
-    - ./util/run_vsim.sh
+    - make test-$IP
 
 ####################
 # Simulation tests #
@@ -123,7 +121,7 @@ snitch-ip-tests:
 snitch-cluster-vlt:
   needs: [snitch-cluster-sw]
   script:
-    - make verilator
+    - make verilator TRACE=OFF -j
     - cd test
     - ../util/experiments/run.py run.yaml --simulator verilator -j --run-dir runs/vlt
 
@@ -131,7 +129,7 @@ snitch-cluster-vlt:
 snitch-cluster-vcs:
   needs: [snitch-cluster-sw]
   script:
-    - make vcs
+    - make vcs TRACE=OFF -j
     - cd test
     - ../util/experiments/run.py run.yaml --simulator vcs -j --run-dir runs/vcs
 
@@ -164,7 +162,7 @@ snitch-cluster-vsim:
 snitch-cluster-omega-vsim:
   script:
     - make CFG_OVERRIDE=cfg/omega.json sw -j
-    - make vsim -j
+    - make vsim TRACE=OFF -j
     - cd test
     - ../util/experiments/run.py run.yaml --simulator vsim -j --run-dir runs/vsim
 
@@ -172,33 +170,41 @@ snitch-cluster-omega-vsim:
 snitch-cluster-mchan-vsim:
   script:
     - make CFG_OVERRIDE=cfg/dma_mchan.json sw -j
-    - make vsim -j
+    - make vsim TRACE=OFF -j
     - cd test
     - ../util/experiments/run.py dma_mchan.yaml --simulator vsim -j --run-dir runs/vsim
 
 # Test Mempool configuration
 snitch-cluster-mempool-vsim:
   script:
-    - make CFG_OVERRIDE=cfg/mempool.json SN_MCPU=snitch-mempool sw -j
+    - make CFG_OVERRIDE=cfg/mempool.json sw -j
     - make vsim -j
     - cd test
     - ../util/experiments/run.py mempool.yaml --simulator vsim -j --run-dir runs/vsim
-    - make -C .. SIM_DIR=$PWD/runs/vsim/simple SN_MCPU=snitch-mempool annotate -j
+    - make -C .. SIM_DIR=$PWD/runs/vsim/simple annotate -j
 
 # Additional tests for different FREP configurations
 snitch-cluster-frep-vsim:
   script:
     # Large FREP configuration
     - make CFG_OVERRIDE=cfg/frep_xl.json sw -j
-    - make vsim -j
+    - make vsim TRACE=OFF -j
     - cd test
     - ../util/experiments/run.py frep_xl.yaml --simulator vsim -j --run-dir runs/vsim
     - cd -
     # Small FREP configuration
     - make CFG_OVERRIDE=cfg/frep_xs.json sw -j
-    - make vsim -j
+    - make vsim TRACE=OFF -j
     - cd test
     - ../util/experiments/run.py frep_xs.yaml --simulator vsim -j --run-dir runs/vsim
+
+# Test Spatz configuration
+snitch-cluster-spatz-vsim:
+  script:
+    - make CFG_OVERRIDE=cfg/spatz.json sw -j
+    - make vsim TRACE=OFF -j
+    - cd test
+    - ../util/experiments/run.py spatz.yaml --simulator vsim -j --run-dir runs/vsim
 
 # COPIFT experiments
 snitch-cluster-copift-vsim:

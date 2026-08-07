@@ -20,6 +20,12 @@ ${c[prop]}${', ' if not loop.last else ''}\
   % endfor
 </%def>\
 
+<%def name="core_cfg_lambda(f)">\
+  % for c in cfg['cluster']['cores']:
+${f(c)}${', ' if not loop.last else ''}\
+  % endfor
+</%def>\
+
 <%def name="core_cfg_flat(prop)">\
 ${cfg['cluster']['nr_cores']}'b\
   % for c in cfg['cluster']['cores'][::-1]:
@@ -296,11 +302,12 @@ package snitch_cluster_wrapper_pkg;
       RVE: ${int(getattr(c['isa_parsed'], 'e'))},
       RVF: ${int(getattr(c['isa_parsed'], 'f'))},
       RVD: ${int(getattr(c['isa_parsed'], 'd'))},
+      RVV: ${int(getattr(c['isa_parsed'], 'v'))},
       Xdma: ${int(c['xdma'])},
       Xssr: ${int(c['xssr'])},
       Xfrep: ${int(c['xfrep'])},
       Xcopift: ${int(c['xcopift'])},
-      XF16: ${int(c['xf16'])},
+      Zfh: ${int(c['zfh'])},
       XF16ALT: ${int(c['xf16alt'])},
       XF8: ${int(c['xf8'])},
       XF8ALT: ${int(c['xf8alt'])},
@@ -335,7 +342,7 @@ ${ssr_cfg(core, '{reg_idx}', '/*None*/ 0', ',')}\
   };
 
   // Forward potentially optional configuration parameters
-  localparam snitch_cluster_pkg::hart_id_t CfgBaseHartId    = (${to_sv_hex(cfg['cluster']['cluster_base_hartid'], 32)});
+  localparam snitch_pkg::hart_id_t   CfgBaseHartId        = (${to_sv_hex(cfg['cluster']['cluster_base_hartid'], 32)});
   localparam addr_t                  CfgClusterBaseAddr   = (${to_sv_hex(cfg['cluster']['cluster_base_addr'], cfg['cluster']['addr_width'])});
   localparam addr_t                  CfgClusterBaseOffset = (${to_sv_hex(cfg['cluster']['cluster_base_offset'], cfg['cluster']['addr_width'])});
 
@@ -394,16 +401,18 @@ ${ssr_cfg(core, '{reg_idx}', '/*None*/ 0', ',')}\
   localparam bit NarrowAxiPortExpose      = ${int(cfg['cluster']['narrow_axi_port_expose'])};
 
   // Per-core localparam arrays
-  localparam int unsigned NumIntOutstandingLoads [NrCores] = '{${core_cfg('num_int_outstanding_loads')}};
-  localparam int unsigned NumIntOutstandingMem   [NrCores] = '{${core_cfg('num_int_outstanding_mem')}};
-  localparam int unsigned NumFPOutstandingLoads  [NrCores] = '{${core_cfg('num_fp_outstanding_loads')}};
-  localparam int unsigned NumFPOutstandingMem    [NrCores] = '{${core_cfg('num_fp_outstanding_mem')}};
-  localparam int unsigned NumDTLBEntries         [NrCores] = '{${core_cfg('num_dtlb_entries')}};
-  localparam int unsigned NumITLBEntries         [NrCores] = '{${core_cfg('num_itlb_entries')}};
-  localparam int unsigned NumSequencerInstr      [NrCores] = '{${core_cfg('num_sequencer_instructions')}};
-  localparam int unsigned NumSequencerLoops      [NrCores] = '{${core_cfg('num_sequencer_loops')}};
-  localparam int unsigned NumSsrs                [NrCores] = '{${core_cfg('num_ssrs')}};
-  localparam int unsigned SsrMuxRespDepth        [NrCores] = '{${core_cfg('ssr_mux_resp_depth')}};
+  localparam int unsigned NumIntOutstandingLoads   [NrCores] = '{${core_cfg('num_int_outstanding_loads')}};
+  localparam int unsigned NumIntOutstandingMem     [NrCores] = '{${core_cfg('num_int_outstanding_mem')}};
+  localparam int unsigned NumFPOutstandingLoads    [NrCores] = '{${core_cfg('num_fp_outstanding_loads')}};
+  localparam int unsigned NumFPOutstandingMem      [NrCores] = '{${core_cfg('num_fp_outstanding_mem')}};
+  localparam int unsigned NumDTLBEntries           [NrCores] = '{${core_cfg('num_dtlb_entries')}};
+  localparam int unsigned NumITLBEntries           [NrCores] = '{${core_cfg('num_itlb_entries')}};
+  localparam int unsigned NumSequencerInstr        [NrCores] = '{${core_cfg('num_sequencer_instructions')}};
+  localparam int unsigned NumSequencerLoops        [NrCores] = '{${core_cfg('num_sequencer_loops')}};
+  localparam int unsigned NumSsrs                  [NrCores] = '{${core_cfg('num_ssrs')}};
+  localparam int unsigned SsrMuxRspDepth           [NrCores] = '{${core_cfg('ssr_mux_rsp_depth')}};
+  localparam bit          SpatzDoubleBw            [NrCores] = '{${core_cfg_lambda(lambda x: int(x['spatz']['double_bw']))}};
+  localparam int unsigned NumSpatzOutstandingLoads [NrCores] = '{${core_cfg_lambda(lambda x: int(x['spatz']['num_outstanding_loads']))}};
 
 endpackage
 // verilog_lint: waive-stop package-filename
