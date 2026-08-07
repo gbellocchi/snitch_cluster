@@ -20,7 +20,7 @@ int main() {
     // Remote cluster buffer. Use same offset in the neighbouring cluster's TCDM.
     // Accesses to this address leave the cluster via AXI.
     uint32_t remote_cluster_idx = (snrt_cluster_idx() + 1) % snrt_cluster_num();
-    uint32_t *remote = (uint32_t *)snrt_remote_l1_ptr(local, snrt_cluster_idx(), 
+    uint32_t *remote = (uint32_t *)snrt_remote_l1_ptr(local, snrt_cluster_idx(),
                                                       remote_cluster_idx);
 
     const uint32_t sizes[] = {1, 2, 4, 8, 16, 32, 64, 128, 256};

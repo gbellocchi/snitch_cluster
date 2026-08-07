@@ -529,7 +529,6 @@ inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value,
                      : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
                                          13, OP_CUSTOM1)),
                        "r"(reg_size));
-
     }
 
     return reg_txid;

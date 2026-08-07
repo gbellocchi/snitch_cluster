@@ -386,9 +386,9 @@ static inline int gemm(const gemm_args_t *args) {
                         if (largs->partition_banks) {
                             uint32_t row_size =
                                 banks_per_buffer * SNRT_TCDM_BANK_WIDTH;
-                            uint32_t c_span = (tile_c_size / row_size) * 
+                            uint32_t c_span = (tile_c_size / row_size) *
                                               SNRT_TCDM_HYPERBANK_WIDTH;
-                            snrt_dma_memset_init_1d((uint64_t)lc[c_buff_idx], 0, 
+                            snrt_dma_memset_init_1d((uint64_t)lc[c_buff_idx], 0,
                                                     c_span, 0);
                         } else {
                             snrt_dma_memset_init_1d((uint64_t)lc[c_buff_idx], 0,
