@@ -956,10 +956,8 @@ module snitch_cluster
         .obi_rsp_t (obi_dma_rsp_t),
         .tcdm_req_t (tcdm_dma_req_t),
         .tcdm_rsp_t (tcdm_dma_rsp_t),
-        .AddrWidth (PhysicalAddrWidth),
         .DataWidth (WideDataWidth),
         .IdWidth (WideIdWidthIn),
-        .UserWidth (CoreUserWidth),
         .MemRespLat (MemoryMacroLatency),
         .NumChannels (DMANumChannels)
       ) i_obi_to_tcdm (

@@ -5,18 +5,14 @@
 // Author: Lucia Luzi <luzil@ethz.ch>
 // Author: Gianluca Bellocchi <gianluca.bellocchi@unimore.it>
 
-`include "reqrsp_interface/typedef.svh"
-
 /// Convert OBI to TCDM protocol.
 module obi_to_tcdm #(
     parameter type obi_req_t = logic,
     parameter type obi_rsp_t = logic,
     parameter type tcdm_req_t = logic,
     parameter type tcdm_rsp_t = logic,
-    parameter int unsigned AddrWidth   = 0,
     parameter int unsigned DataWidth   = 0,
     parameter int unsigned IdWidth     = 0,
-    parameter int unsigned UserWidth   = 0,
     parameter int unsigned MemRespLat  = 0,
     parameter int unsigned NumChannels = 1
 ) (
@@ -28,31 +24,26 @@ module obi_to_tcdm #(
     input  tcdm_rsp_t [NumChannels-1:0] tcdm_rsp_i
 );
 
-  typedef logic [AddrWidth-1:0]   addr_t;
-  typedef logic [DataWidth-1:0]   data_t;
-  typedef logic [DataWidth/8-1:0] strb_t;
-  typedef logic [UserWidth-1:0]   user_t;
-  typedef logic [IdWidth-1:0]     id_t;
-
-  `REQRSP_TYPEDEF_ALL(reqrsp, addr_t, data_t, strb_t, user_t)
+  typedef logic [DataWidth-1:0]   obi_data_t;
+  typedef logic [IdWidth-1:0]     obi_id_t;
 
   for (genvar i = 0; i < NumChannels; i++) begin : gen_tcdm_obi_adapt
     // Backpressure on new requests, while another transaction is still not consumed.
     logic can_accept;
     // Merged read-write R-channel responses after pipeline.
     logic  obi_p_rvalid;
-    data_t obi_p_rdata;
-    id_t   obi_p_rid;
+    obi_data_t obi_p_rdata;
+    obi_id_t   obi_p_rid;
     /// Hold register signals
     logic  r_pending;
-    data_t r_data_reg;
-    id_t   r_id_reg;
+    obi_data_t r_data_reg;
+    obi_id_t   r_id_reg;
 
     assign tcdm_req_o[i].q_valid = obi_req_i[i].req & can_accept;
     assign tcdm_req_o[i].q = '{
       addr:  obi_req_i[i].a.addr,
       write: obi_req_i[i].a.we,
-      amo:   snitch_pkg::AMONone,
+      amo:   lsu_pkg::AMONone,
       data:  obi_req_i[i].a.wdata,
       strb:  obi_req_i[i].a.be,
       user:  '0
@@ -67,7 +58,7 @@ module obi_to_tcdm #(
       // Pipelined signals
       logic [MemRespLat-1:0] p_ack;
       logic [MemRespLat-1:0] p_we;
-      id_t  [MemRespLat-1:0] p_id;
+      obi_id_t  [MemRespLat-1:0] p_id;
 
       /// R-channel response pipeline.
       always_ff @(posedge clk_i or negedge rst_ni) begin: r_resp_pipeline
