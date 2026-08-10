@@ -24,22 +24,33 @@ module obi_to_tcdm #(
     input  tcdm_rsp_t [NumChannels-1:0] tcdm_rsp_i
 );
 
-  typedef logic [DataWidth-1:0]   obi_data_t;
-  typedef logic [IdWidth-1:0]     obi_id_t;
+  typedef logic [DataWidth-1:0] obi_data_t;
+  typedef logic [IdWidth-1:0]   obi_id_t;
+
+  typedef struct packed {
+    obi_data_t rdata;
+    obi_id_t   rid;
+  } obi_r_payload_t;
+
+  localparam int unsigned RspBufDepth = MemRespLat + 1;
+  localparam int unsigned CreditWidth = $clog2(RspBufDepth + 1);
 
   for (genvar i = 0; i < NumChannels; i++) begin : gen_tcdm_obi_adapt
-    // Backpressure on new requests, while another transaction is still not consumed.
+    // Backpressure on new requests.
     logic can_accept;
     // Merged read-write R-channel responses after pipeline.
-    logic  obi_p_rvalid;
+    logic      obi_p_rvalid;
     obi_data_t obi_p_rdata;
     obi_id_t   obi_p_rid;
-    /// Hold register signals
-    logic  r_pending;
-    obi_data_t r_data_reg;
-    obi_id_t   r_id_reg;
+    /// Credit counter signals
+    logic [CreditWidth-1:0] credit_q, credit_d;
+    logic                   req_hs, rsp_hs;
+    /// Response buffer signals
+    obi_r_payload_t rsp_buf_in, rsp_buf_out;
+    logic           rsp_buf_valid;
 
     assign tcdm_req_o[i].q_valid = obi_req_i[i].req & can_accept;
+
     assign tcdm_req_o[i].q = '{
       addr:  obi_req_i[i].a.addr,
       write: obi_req_i[i].a.we,
@@ -48,17 +59,19 @@ module obi_to_tcdm #(
       strb:  obi_req_i[i].a.be,
       user:  '0
     };
+
     assign obi_rsp_o[i].gnt = tcdm_rsp_i[i].q_ready & can_accept;
 
-    /// This pipeline drives backward TCDM write acknowledgement, which would otherwise be missing
-    /// as TCDM writes are fire-and-forget. Instead, OBI has a R-channel response for both reads
-    /// and writes. The converter thus drives write ack after MemRespLat cycles from the first
-    /// grant to the OBI interface.
+    /// Backward TCDM write acknowledgement.
+    ///
+    /// This would be missing as TCDM writes are fire-and-forget. OBI has instead a R-channel response 
+    /// for both reads and writes. The converter thus drives write ack after MemRespLat cycles from the
+    /// first grant to the OBI interface.
     if (MemRespLat > 0) begin : gen_id_pipeline
       // Pipelined signals
-      logic [MemRespLat-1:0] p_ack;
-      logic [MemRespLat-1:0] p_we;
-      obi_id_t  [MemRespLat-1:0] p_id;
+      logic    [MemRespLat-1:0] p_ack;
+      logic    [MemRespLat-1:0] p_we;
+      obi_id_t [MemRespLat-1:0] p_id;
 
       /// R-channel response pipeline.
       always_ff @(posedge clk_i or negedge rst_ni) begin: r_resp_pipeline
@@ -86,35 +99,6 @@ module obi_to_tcdm #(
       assign obi_p_rdata  = tcdm_rsp_i[i].p.data;
       assign obi_p_rid    = p_id[MemRespLat-1];
 
-      // Prevent new grants while the hold register is occupied.
-      assign can_accept = ~r_pending & ~(obi_p_rvalid & ~obi_req_i[i].rready);
-
-      // Hold register: used to absorb an R response when the OBI interface cannot accept it.
-      always_ff @(posedge clk_i or negedge rst_ni) begin: r_hold_reg
-        if (!rst_ni) begin
-          r_pending <= '0;
-          r_data_reg <= '0;
-          r_id_reg <= '0;
-        end else begin
-          if (r_pending) begin
-            if (obi_req_i[i].rready) r_pending <= '0;
-          end else if (obi_p_rvalid && !obi_req_i[i].rready) begin
-            r_pending <= '1;
-            r_data_reg <= obi_p_rdata;
-            r_id_reg <= obi_p_rid;
-          end
-        end
-      end
-
-      // Assign local R response to OBI response interface.
-      assign obi_rsp_o[i].rvalid = r_pending | obi_p_rvalid;
-      assign obi_rsp_o[i].r = '{
-        rdata:      r_pending ? r_data_reg : obi_p_rdata,
-        rid:        r_pending ? r_id_reg   : obi_p_rid,
-        err:        1'b0,
-        r_optional: '0
-      };
-
     // Zero-latency: write response is valid in the same cycle as the grant.
     end else begin : gen_id_zero_latency
       /// Prepare data for the OBI R-channel.
@@ -122,36 +106,52 @@ module obi_to_tcdm #(
                             (obi_req_i[i].req & obi_rsp_o[i].gnt & obi_req_i[i].a.we);
       assign obi_p_rdata  = tcdm_rsp_i[i].p.data;
       assign obi_p_rid    = obi_req_i[i].a.aid;
-
-      // Prevent new grants while the hold register is occupied.
-      assign can_accept = ~r_pending;
-
-      // Hold register: used to absorb an R response when the OBI interface cannot accept it.
-      always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (!rst_ni) begin
-          r_pending <= '0;
-          r_data_reg <= '0;
-          r_id_reg <= '0;
-        end else begin
-          if (r_pending) begin
-            if (obi_req_i[i].rready) r_pending <= '0;
-          end else if (obi_p_rvalid && !obi_req_i[i].rready) begin
-            r_pending <= '1;
-            r_data_reg <= obi_p_rdata;
-            r_id_reg <= obi_p_rid;
-          end
-        end
-      end
-
-      // Assign local R response to OBI response interface.
-      assign obi_rsp_o[i].rvalid = r_pending | obi_p_rvalid;
-      assign obi_rsp_o[i].r = '{
-        rdata:      r_pending ? r_data_reg: obi_p_rdata,
-        rid:        r_pending ? r_id_reg  : obi_p_rid,
-        err:        1'b0,
-        r_optional: '0
-      };
     end
+
+    /// Credit-based flow control for response buffer.
+    assign req_hs = obi_req_i[i].req  & obi_rsp_o[i].gnt;
+    assign rsp_hs = obi_rsp_o[i].rvalid & obi_req_i[i].rready;
+
+    assign can_accept = (credit_q != '0);
+    assign credit_d   = credit_q - CreditWidth'(req_hs) + CreditWidth'(rsp_hs);
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin : proc_credit
+      if (!rst_ni) begin
+        credit_q <= CreditWidth'(RspBufDepth);
+      end else begin
+        credit_q <= credit_d;
+      end
+    end
+
+    /// Response buffer.
+    assign rsp_buf_in = '{rdata: obi_p_rdata, rid: obi_p_rid};
+
+    cc_stream_fifo #(
+      .FallThrough (1'b1),
+      .Depth       (RspBufDepth),
+      .data_t      (obi_r_payload_t)
+    ) i_rsp_buffer (
+      .clk_i,
+      .rst_ni,
+      .clr_i   (1'b0),
+      .flush_i (1'b0),
+      .usage_o (/* unused */),
+      .data_i  (rsp_buf_in),
+      .valid_i (obi_p_rvalid),
+      .ready_o (/* unused: credit counter guarantees space */),
+      .data_o  (rsp_buf_out),
+      .valid_o (rsp_buf_valid),
+      .ready_i (obi_req_i[i].rready)
+    );
+
+    // Assign local R response to OBI response interface.
+    assign obi_rsp_o[i].rvalid = rsp_buf_valid;
+    assign obi_rsp_o[i].r = '{
+      rdata:      rsp_buf_out.rdata,
+      rid:        rsp_buf_out.rid,
+      err:        1'b0,
+      r_optional: '0
+    };
 
   end
 
