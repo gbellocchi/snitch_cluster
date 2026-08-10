@@ -690,7 +690,6 @@ module snitch_cluster
 
   localparam addr_t ZeroMemAliasStart = PeriphAliasEnd;
   localparam addr_t ZeroMemAliasEnd   = PeriphAliasEnd + ZeroMemorySize * 1024;
-  
   localparam addr_t ExtAliasStart = ZeroMemAliasEnd;
   localparam addr_t ExtAliasEnd   = ExtAliasStart + ExtMemorySize * 1024;
 

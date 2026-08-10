@@ -50,9 +50,9 @@ module obi_to_tcdm #(
     };
     assign obi_rsp_o[i].gnt = tcdm_rsp_i[i].q_ready & can_accept;
 
-    /// This pipeline drives backward TCDM write acknowledgement, which would otherwise be missing 
-    /// as TCDM writes are fire-and-forget. Instead, OBI has a R-channel response for both reads 
-    /// and writes. The converter thus drives write ack after MemRespLat cycles from the first 
+    /// This pipeline drives backward TCDM write acknowledgement, which would otherwise be missing
+    /// as TCDM writes are fire-and-forget. Instead, OBI has a R-channel response for both reads
+    /// and writes. The converter thus drives write ack after MemRespLat cycles from the first
     /// grant to the OBI interface.
     if (MemRespLat > 0) begin : gen_id_pipeline
       // Pipelined signals
