@@ -39,7 +39,7 @@ dependencies:
   axi:
     git: https://github.com/colluca/axi.git
     rev: multicast
-  common_cells: 2.0.0-beta.2
+  common_cells: 2.0.0-beta.3
   core_v_xif:
     git: https://github.com/pulp-platform/core-v-xif.git
     rev: colluca/cvxif-demux-bender-ready
