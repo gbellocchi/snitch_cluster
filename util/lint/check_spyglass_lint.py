@@ -27,10 +27,7 @@ WAIVERS = [
     # shift result wider than LHS truncates bits
     'W486',
     # variable assigned but never read
-    'W528',
-    # to fix in `idma`
-    'W123',
-    'W287a'
+    'W528'
 ]
 
 IMPLICIT_MACROS = [
