@@ -173,7 +173,7 @@ module snitch_cc
   output logic                              barrier_o,
   input  logic                              barrier_i,
   // Address decode map
-  input  addr_rule_t [TCDMAliasEnable:0]    dma_addr_rule_i,
+  input  addr_rule_t [TCDMAliasEnable:0]    dma_addr_map_i,
   // Direct Compute Access (DCA) interface
   input  dca_req_t                          dca_req_i,
   output dca_rsp_t                          dca_rsp_o
@@ -632,7 +632,7 @@ module snitch_cc
       .acc_res_ready_i(snitch_acc_req_demuxed[snitch_pkg::DMA_SS].p_ready),
       .hart_id_i      (hart_id_i),
       .events_o       (axi_dma_events_o),
-      .addr_map_i     (dma_addr_rule_i)
+      .addr_map_i     (dma_addr_map_i)
     );
   end else begin : gen_no_dma
     assign axi_dma_req_o = '0;

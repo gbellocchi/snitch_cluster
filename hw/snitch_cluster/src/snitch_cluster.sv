@@ -818,10 +818,10 @@ module snitch_cluster
   end
 
   // dma address rules
-  xbar_rule_t [1:0] dma_addr_rule;
-  xbar_rule_t [AliasRegionEnable:0] enabled_dma_addr_rule;
+  xbar_rule_t [1:0] dma_addr_map;
+  xbar_rule_t [AliasRegionEnable:0] enabled_dma_addr_map;
 
-  assign dma_addr_rule = '{
+  assign dma_addr_map = '{
     '{idx: TCDMDMA,    start_addr: TCDMAliasStart,         end_addr: TCDMAliasEnd},
     '{idx: TCDMDMA,    start_addr: tcdm_start_address,     end_addr: tcdm_end_address}
   };
@@ -829,9 +829,9 @@ module snitch_cluster
   always_comb begin
     automatic int unsigned i;
     i = 0;
-    enabled_dma_addr_rule[i] = dma_addr_rule[0]; i++; // TCDM
+    enabled_dma_addr_map[i] = dma_addr_map[0]; i++; // TCDM
     if (AliasRegionEnable) begin
-      enabled_dma_addr_rule[i] = dma_addr_rule[1]; i++; // TCDM Alias
+      enabled_dma_addr_map[i] = dma_addr_map[1]; i++; // TCDM Alias
     end
   end
 
@@ -1310,7 +1310,7 @@ module snitch_cluster
       .tcdm_addr_base_i (tcdm_start_address),
       .barrier_o (barrier_in[i]),
       .barrier_i (barrier_out),
-      .dma_addr_rule_i (enabled_dma_addr_rule),
+      .dma_addr_map_i (enabled_dma_addr_map),
       .dca_req_i (dca_lane_req[i]),
       .dca_rsp_o (dca_lane_rsp[i])  
     );
