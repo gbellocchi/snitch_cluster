@@ -567,30 +567,6 @@ module snitch_cluster
   // Define dca_lane_req_t and dca_lane_rsp_t
   `DCA_TYPEDEF_ALL(dca_lane, DcaLaneWidth)
 
-  // Memory Init typedefs
-  typedef struct packed {
-      logic [PhysicalAddrWidth-1:0] cfg;
-      logic [WideDataWidth-1:0]     term;
-      logic [WideDataWidth/8-1:0]   strb;
-      logic [WideIdWidthIn-1:0]     id;
-  } init_req_chan_t;
-
-  typedef struct packed {
-      init_req_chan_t req_chan;
-      logic           req_valid;
-      logic           rsp_ready;
-  } init_req_t;
-
-  typedef struct packed {
-      logic [WideDataWidth-1:0] init;
-  } init_rsp_chan_t;
-
-  typedef struct packed {
-      init_rsp_chan_t rsp_chan;
-      logic           rsp_valid;
-      logic           req_ready;
-  } init_rsp_t;
-
   // OBI typedefs
   `OBI_TYPEDEF_MINIMAL_A_OPTIONAL(a_opt_t)
   `OBI_TYPEDEF_MINIMAL_R_OPTIONAL(r_opt_t)
@@ -1247,10 +1223,6 @@ module snitch_cluster
       .axi_aw_chan_t (axi_mst_dma_aw_chan_t),
       .axi_req_t (axi_mst_dma_req_t),
       .axi_rsp_t (axi_mst_dma_resp_t),
-      .init_req_chan_t (init_req_chan_t),
-      .init_rsp_chan_t (init_rsp_chan_t),
-      .init_req_t (init_req_t),
-      .init_rsp_t (init_rsp_t),
       .obi_a_chan_t (obi_a_chan_t),
       .obi_r_chan_t (obi_r_chan_t),
       .obi_req_t (obi_dma_req_t),

@@ -37,10 +37,6 @@ module snitch_cc
   parameter type         axi_aw_chan_t      = logic,
   parameter type         axi_req_t          = logic,
   parameter type         axi_rsp_t          = logic,
-  parameter type         init_req_chan_t    = logic,
-  parameter type         init_rsp_chan_t    = logic,
-  parameter type         init_req_t         = logic,
-  parameter type         init_rsp_t         = logic,
   parameter type         obi_a_chan_t       = logic,
   parameter type         obi_r_chan_t       = logic,
   parameter type         obi_req_t          = logic,
@@ -205,6 +201,31 @@ module snitch_cc
 
   // Define acc_req_t, acc_rsp_t, acc_req_chan_t and acc_rsp_chan_t
   `SNITCH_ACC_TYPEDEF_ALL(DataWidth, AddrWidth)
+
+  // Define init_req_chan_t and init_rsp_chan_t
+  typedef struct packed {
+      logic [AddrWidth-1:0]       cfg;
+      logic [DMADataWidth-1:0]    term;
+      logic [DMADataWidth/8-1:0]  strb;
+      logic [DMAIdWidth-1:0]      id;
+  } init_req_chan_t;
+
+  typedef struct packed {
+      logic [DMADataWidth-1:0] init;
+  } init_rsp_chan_t;
+
+  // Define init_req_t and init_rsp_t
+  typedef struct packed {
+      init_req_chan_t req_chan;
+      logic           req_valid;
+      logic           rsp_ready;
+  } init_req_t;
+
+  typedef struct packed {
+      init_rsp_chan_t rsp_chan;
+      logic           rsp_valid;
+      logic           req_ready;
+  } init_rsp_t;
 
   // Accelerator offload interface
   acc_req_t snitch_acc_req;
