@@ -22,3 +22,7 @@ inline uint32_t snrt_dma_start_1d(uint64_t dst, uint64_t src, size_t size,
                                   const uint32_t channel = 0);
 
 inline void snrt_dma_memset(void *ptr, uint8_t value, uint32_t len);
+
+static inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value,
+                                               uint32_t size,
+                                               const uint32_t channel = 0);

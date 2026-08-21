@@ -13,22 +13,6 @@
 
 #pragma once
 
-#define OP_CUSTOM1 0b0101011
-#define XDMA_FUNCT3 0b000
-#define DMSRC_FUNCT7 0b0000000
-#define DMDST_FUNCT7 0b0000001
-#define DMCPYI_FUNCT7 0b0000010
-#define DMCPY_FUNCT7 0b0000011
-#define DMSTATI_FUNCT7 0b0000100
-#define DMSTAT_FUNCT7 0b0000101
-#define DMSTR_FUNCT7 0b0000110
-#define DMREP_FUNCT7 0b0000111
-#define DMINIT_FUNCT7 0b0001001
-
-#define R_TYPE_ENCODE(funct7, rs2, rs1, funct3, rd, opcode)                    \
-    ((funct7 << 25) | (rs2 << 20) | (rs1 << 15) | (funct3 << 12) | (rd << 7) | \
-     (opcode))
-
 #include <math.h>
 
 /**
@@ -482,56 +466,48 @@ inline void snrt_dma_memset(void *ptr, uint8_t value, uint32_t len) {
  * @param value Value to set.
  * @param size The size of the transfer in bytes.
  * @param channel The index of the channel.
+ * @return The DMA transfer ID.
+ * @note The transfer is asynchronous: use snrt_dma_wait() or
+ *       snrt_dma_wait_all() to block until it completes.
+ * @note The function passes the @p channel argument as an immediate,
+ *       thus this must be known at compile time. As a consequence, the
+ *       function must use internal linkage (`static` keyword) and must be
+ *       always inlined. This is true also for all functions invoking this
+ *       function, and passing down an argument to @p channel.
  */
-inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value,
-                                        uint32_t size, uint32_t channel) {
-    register uint32_t reg_dst_low asm("a0") = ptr >> 0;    // 10
-    register uint32_t reg_dst_high asm("a1") = ptr >> 32;  // 11
-    register uint32_t reg_value asm("a2") = value;         // 12
-    register uint32_t reg_txid asm("a3");                  // 13
-    register uint32_t reg_size asm("a4") = size;           // 14
+static inline uint32_t snrt_dma_memset_init_1d(uint64_t ptr, uint8_t value,
+                                               uint32_t size,
+                                               const uint32_t channel) {
+#ifdef SNRT_SUPPORTS_DMA
+    uint32_t dst_lo = ptr & 0xFFFFFFFF;
+    uint32_t dst_hi = ptr >> 32;
+    uint32_t txid;
 
-    // dmdst a0, a1
-    asm volatile(".word %0\n" ::"i"(R_TYPE_ENCODE(DMDST_FUNCT7, 11, 10,
-                                                  XDMA_FUNCT3, 0, OP_CUSTOM1)),
-                 "r"(reg_dst_high), "r"(reg_dst_low));
+    asm volatile("dmdst %[dst_lo], %[dst_hi] \n"
+                 :
+                 : [ dst_lo ] "r"(dst_lo), [ dst_hi ] "r"(dst_hi));
 
     if (value == 0x00) {
-        // register uint32_t cfg asm("a5") = channel << 2;        // 15
-        uint32_t cfg = channel << 2;
-        // dminit a3, a4, channel | 0b00
-        asm volatile(".word %1\n"
-                     : "=r"(reg_txid)
-                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                         13, OP_CUSTOM1)),
-                       "r"(reg_size));
-
+        asm volatile("dminit %[txid], %[size], (%[channel] << 2) | 0 \n"
+                     : [ txid ] "=r"(txid)
+                     : [ size ] "r"(size), [ channel ] "i"(channel));
     } else if (value == 0xff) {
-        uint32_t cfg = channel << 2 | 1;  // 15
-
-        // dminit a3, a4, channel | 0b01
-        asm volatile(".word %1\n"
-                     : "=r"(reg_txid)
-                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                         13, OP_CUSTOM1)),
-                       "r"(reg_size));
+        asm volatile("dminit %[txid], %[size], (%[channel] << 2) | 1 \n"
+                     : [ txid ] "=r"(txid)
+                     : [ size ] "r"(size), [ channel ] "i"(channel));
     } else {
-        uint32_t cfg = channel << 2 | 2;  // 15
-
-        // dmsrc value, 0
-        asm volatile(".word %0\n" ::"i"(R_TYPE_ENCODE(
-                         DMSRC_FUNCT7, 0, 12, XDMA_FUNCT3, 0, OP_CUSTOM1)),
-                     "r"(reg_value));
-
-        // dminit a3, a4, channel | 0b10
-        asm volatile(".word %1\n"
-                     : "=r"(reg_txid)
-                     : "i"(R_TYPE_ENCODE(DMINIT_FUNCT7, cfg, 14, XDMA_FUNCT3,
-                                         13, OP_CUSTOM1)),
-                       "r"(reg_size));
+        uint32_t val = value;
+        asm volatile("dmsrc %[val], zero \n" : : [ val ] "r"(val));
+        asm volatile("dminit %[txid], %[size], (%[channel] << 2) | 2 \n"
+                     : [ txid ] "=r"(txid)
+                     : [ size ] "r"(size), [ channel ] "i"(channel));
     }
 
-    return reg_txid;
+    return txid;
+#else
+    memset((void *)ptr, (int)value, size);
+    return 0;
+#endif
 }
 
 /**
