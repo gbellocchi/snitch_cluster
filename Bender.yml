@@ -34,7 +34,7 @@ dependencies:
     rev: common-cells-v2
   idma:
     git: https://github.com/pulp-platform/idma.git
-    rev: __deploy__cbffd55__gb/inst64-init-write-rsp-fix-spyglass
+    rev: __deploy__ba01de2__devel
     pass_targets: ["snitch_cluster"]
   axi:
     git: https://github.com/colluca/axi.git
