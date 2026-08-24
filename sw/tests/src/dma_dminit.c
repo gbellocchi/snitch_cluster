@@ -23,9 +23,7 @@ int main() {
     snrt_fence();
 
     // Write data to main memory.
-    snrt_dma_txid_t id =
-        snrt_dma_memset_init_1d((uint64_t)buffer, 0x55, sizeof(buffer), 0);
-    snrt_dma_wait_all(0);
+    snrt_dma_memset((uint64_t)buffer, 0x55, sizeof(buffer), 0);
 
     // Check that the main memory buffer contains the correct data.
     for (uint32_t i = 0; i < 32; i++) {
@@ -34,8 +32,7 @@ int main() {
 
     // Write data to L1.
     snrt_fence();
-    id = snrt_dma_memset_init_1d((uint64_t)buffer_dst, 0xff, sizeof(buffer), 0);
-    snrt_dma_wait_all(0);
+    snrt_dma_memset((uint64_t)buffer_dst, 0xff, sizeof(buffer), 0);
 
     // Check that the L1 buffer contains the correct data.
     for (uint32_t i = 0; i < 32; i++) {
