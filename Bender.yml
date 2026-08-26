@@ -45,7 +45,7 @@ dependencies:
     rev: colluca/cvxif-demux-bender-ready
   FPnew:
     git: https://github.com/pulp-platform/cvfpu.git
-    rev: common-cells-v2
+    rev: bump-common-cells-v2
   obi:
     git: https://github.com/pulp-platform/obi.git
     rev: common-cells-v2
@@ -57,7 +57,7 @@ dependencies:
   riscv-dbg: 0.8.1
   spatz_vpu:
     git: https://github.com/pulp-platform/spatz_vpu.git
-    rev: dca
+    rev: jay/fpnew-mxcore
 
 workspace:
   package_links:

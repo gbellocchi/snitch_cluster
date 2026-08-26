@@ -73,7 +73,7 @@ packages:
     dependencies:
     - common_cells
   fpnew:
-    revision: 46cb33a4ce6b04b83ec38ebd288dd58a031a6390
+    revision: 45f273e95ccc5123a2c3d4d02c9b62f73385fd8f
     version: null
     source:
       Git: https://github.com/pulp-platform/cvfpu.git
@@ -81,8 +81,8 @@ packages:
     - common_cells
     - fpu_div_sqrt_mvp
   fpu_div_sqrt_mvp:
-    revision: 86e1f558b3c95e91577c41b2fc452c86b04e85ac
-    version: 1.0.4
+    revision: af8562ebfe4a18765ed7a4f059861e7985baa869
+    version: null
     source:
       Git: https://github.com/pulp-platform/fpu_div_sqrt_mvp.git
     dependencies:
@@ -142,7 +142,7 @@ packages:
     dependencies:
     - tech_cells_generic
   spatz_vpu:
-    revision: 039ea68967fe8d59fea3803f6ec3682cb1fde5b3
+    revision: 5818fad0b44ce0d4cd88ddf4c05df8e3302474b7
     version: null
     source:
       Git: https://github.com/pulp-platform/spatz_vpu.git
