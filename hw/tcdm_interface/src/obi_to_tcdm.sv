@@ -42,10 +42,10 @@ module obi_to_tcdm #(
     logic      obi_p_rvalid;
     obi_data_t obi_p_rdata;
     obi_id_t   obi_p_rid;
-    /// Credit counter signals
+    // Credit counter signals.
     logic [CreditWidth-1:0] credit_q, credit_d;
     logic                   req_hs, rsp_hs;
-    /// Response buffer signals
+    // Response buffer signals.
     obi_r_payload_t rsp_buf_in, rsp_buf_out;
     logic           rsp_buf_valid;
 
@@ -62,18 +62,18 @@ module obi_to_tcdm #(
 
     assign obi_rsp_o[i].gnt = tcdm_rsp_i[i].q_ready & can_accept;
 
-    /// Backward TCDM write acknowledgement.
-    ///
-    /// This would be missing as TCDM writes are fire-and-forget. OBI has instead a R-channel response 
-    /// for both reads and writes. The converter thus drives write ack after MemRespLat cycles from the
-    /// first grant to the OBI interface.
+    // Backward TCDM write acknowledgement.
+    //
+    // This would be missing as TCDM writes are fire-and-forget. OBI has instead a R-channel response
+    // for both read and write transactions. The converter thus drives write ack after `MemRespLat`
+    // cycles from the first grant to the OBI interface.
     if (MemRespLat > 0) begin : gen_id_pipeline
-      // Pipelined signals
+      // Pipelined signals.
       logic    [MemRespLat-1:0] p_ack;
       logic    [MemRespLat-1:0] p_we;
       obi_id_t [MemRespLat-1:0] p_id;
 
-      /// R-channel response pipeline.
+      // R-channel response pipeline.
       always_ff @(posedge clk_i or negedge rst_ni) begin: r_resp_pipeline
         if (!rst_ni) begin
           p_ack <= '0;
@@ -93,7 +93,7 @@ module obi_to_tcdm #(
         end
       end
 
-      /// Prepare data for the OBI R-channel.
+      // Prepare data for the OBI R-channel.
       assign obi_p_rvalid = tcdm_rsp_i[i].p_valid |
                           (p_ack[MemRespLat-1] & p_we[MemRespLat-1]);
       assign obi_p_rdata  = tcdm_rsp_i[i].p.data;
@@ -101,14 +101,14 @@ module obi_to_tcdm #(
 
     // Zero-latency: write response is valid in the same cycle as the grant.
     end else begin : gen_id_zero_latency
-      /// Prepare data for the OBI R-channel.
+      // Prepare data for the OBI R-channel.
       assign obi_p_rvalid = tcdm_rsp_i[i].p_valid |
                             (obi_req_i[i].req & obi_rsp_o[i].gnt & obi_req_i[i].a.we);
       assign obi_p_rdata  = tcdm_rsp_i[i].p.data;
       assign obi_p_rid    = obi_req_i[i].a.aid;
     end
 
-    /// Credit-based flow control for response buffer.
+    // Credit-based flow control for response buffer.
     assign req_hs = obi_req_i[i].req  & obi_rsp_o[i].gnt;
     assign rsp_hs = obi_rsp_o[i].rvalid & obi_req_i[i].rready;
 
@@ -123,7 +123,7 @@ module obi_to_tcdm #(
       end
     end
 
-    /// Response buffer.
+    // Response buffer.
     assign rsp_buf_in = '{rdata: obi_p_rdata, rid: obi_p_rid};
 
     cc_stream_fifo #(
