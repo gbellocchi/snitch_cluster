@@ -641,14 +641,8 @@ module snitch_cluster
   assign cluster_periph_start_address = IntBootromEnable ? bootrom_end_address : tcdm_end_address;
   assign cluster_periph_end_address   = cluster_periph_start_address + ClusterPeriphSize * 1024;
 
-  // WIP: Modify address space to definitely remove zero memory addresses.
-  localparam int unsigned ZeroMemorySize = 64;
-  addr_t zero_mem_start_address, zero_mem_end_address;
-  assign zero_mem_start_address = cluster_periph_end_address;
-  assign zero_mem_end_address   = cluster_periph_end_address + ZeroMemorySize * 1024;
-
   addr_t ext_mem_start_address, ext_mem_end_address;
-  assign ext_mem_start_address = zero_mem_end_address;
+  assign ext_mem_start_address = cluster_periph_end_address + 64 * 1024;
   assign ext_mem_end_address   = ext_mem_start_address + ExtMemorySize * 1024;
 
   addr_t cluster_start_address, cluster_end_address;
@@ -664,9 +658,7 @@ module snitch_cluster
   localparam addr_t PeriphAliasStart = IntBootromEnable ? BootromAliasEnd : TCDMAliasEnd;
   localparam addr_t PeriphAliasEnd   = PeriphAliasStart + ClusterPeriphSize * 1024;
 
-  localparam addr_t ZeroMemAliasStart = PeriphAliasEnd;
-  localparam addr_t ZeroMemAliasEnd   = PeriphAliasEnd + ZeroMemorySize * 1024;
-  localparam addr_t ExtAliasStart = ZeroMemAliasEnd;
+  localparam addr_t ExtAliasStart = PeriphAliasEnd + 64 * 1024;
   localparam addr_t ExtAliasEnd   = ExtAliasStart + ExtMemorySize * 1024;
 
   // ----------------
