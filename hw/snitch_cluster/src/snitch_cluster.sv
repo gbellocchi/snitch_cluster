@@ -671,8 +671,8 @@ module snitch_cluster
   axi_mst_req_t  [NrNarrowMasters-1:0] narrow_axi_mst_req;
   axi_mst_resp_t [NrNarrowMasters-1:0] narrow_axi_mst_rsp;
 
-  axi_mst_dma_req_t  soc_in_axi_req;
-  axi_mst_dma_resp_t soc_in_axi_rsp;
+  axi_mst_dma_req_t  wide_in_req_q;
+  axi_mst_dma_resp_t wide_in_rsp_q;
 
   // DMA AXI buses
   axi_mst_dma_req_t  [NrWideMasters-1:0] wide_axi_mst_req;
@@ -769,8 +769,8 @@ module snitch_cluster
     .rst_ni (rst_ni),
     .slv_req_i (wide_in_req_i),
     .slv_resp_o (wide_in_resp_o),
-    .mst_req_o (soc_in_axi_req),
-    .mst_resp_i (soc_in_axi_rsp)
+    .mst_req_o (wide_in_req_q),
+    .mst_resp_i (wide_in_rsp_q)
   );
 
   // Enable default master port for wide XBAR
@@ -881,8 +881,8 @@ module snitch_cluster
     .clk_i,
     .rst_ni,
     .busy_o (),
-    .axi_req_i (soc_in_axi_req),
-    .axi_resp_o (soc_in_axi_rsp),
+    .axi_req_i (wide_in_req_q),
+    .axi_resp_o (wide_in_rsp_q),
     .mem_req_o ({ext_dma_req[1].q_valid, ext_dma_req[0].q_valid}),
     .mem_gnt_i ({ext_dma_rsp[1].q_ready, ext_dma_rsp[0].q_ready}),
     .mem_addr_o (ext_dma_req_q_addr_nontrunc),
