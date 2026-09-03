@@ -32,11 +32,6 @@ package snitch_cluster_pkg;
     ToSoC     = 1
   } dma_e;
 
-  typedef enum int unsigned {
-    SDMAMst  = 32'd0,
-    ICache   = 32'd1
-  } cluster_master_dma_e;
-
   /// Possible interconnect implementations.
   typedef enum bit {
     /// Crossbar implementation. We call it `LogarithmicInterconnect` because the

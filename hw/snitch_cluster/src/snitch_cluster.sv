@@ -1323,8 +1323,8 @@ module snitch_cluster
     end
     if (IsaCfg[i].Xdma) begin : gen_dma_connection
       for (genvar j = 0; j < DMANumChannels; j++) begin : gen_dma_axi_connection
-        assign wide_axi_mst_req[SDMAMst + j] = axi_dma_req[j];
-        assign axi_dma_res[j] = wide_axi_mst_rsp[SDMAMst + j];
+        assign wide_axi_mst_req[j] = axi_dma_req[j];
+        assign axi_dma_res[j] = wide_axi_mst_rsp[j];
       end
       assign dma_events = dma_core_events;
     end
@@ -1378,8 +1378,8 @@ module snitch_cluster
       .hive_rsp_o (hive_rsp_reshape),
       .ptw_data_req_o (ptw_req[i]),
       .ptw_data_rsp_i (ptw_rsp[i]),
-      .axi_req_o (wide_axi_mst_req[SDMAMst+DMANumChannels+i]),
-      .axi_rsp_i (wide_axi_mst_rsp[SDMAMst+DMANumChannels+i]),
+      .axi_req_o (wide_axi_mst_req[DMANumChannels+i]),
+      .axi_rsp_i (wide_axi_mst_rsp[DMANumChannels+i]),
       .icache_prefetch_enable_i (icache_prefetch_enable),
       .icache_events_o(icache_events_reshape),
       .sram_cfg_icache_tag_i  (sram_cfg_icache_tag_i[i]),
