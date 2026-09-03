@@ -877,7 +877,7 @@ module snitch_cluster
     .IdWidth (WideIdWidthIn),
     .MemDataWidth (WideDataWidth),
     .BufDepth (MemoryMacroLatency + 1)
-  ) i_axi_to_mem_split_soc_in (
+  ) i_axi_to_mem_split (
     .clk_i,
     .rst_ni,
     .busy_o (),
