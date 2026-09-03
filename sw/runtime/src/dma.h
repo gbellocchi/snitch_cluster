@@ -471,7 +471,7 @@ static inline void snrt_dma_memset(uint64_t ptr, uint8_t value, uint32_t size,
                      : [ txid ] "=r"(txid)
                      : [ size ] "r"(size), [ channel ] "i"(channel));
     } else {
-        // Initialize with value arbitrary value.
+        // Initialize with arbitrary value.
         uint32_t val = value;
         asm volatile("dmsrc %[val], zero \n" : : [ val ] "r"(val));
         asm volatile("dminit %[txid], %[size], (%[channel] << 2) | 2 \n"
