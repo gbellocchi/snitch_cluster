@@ -643,6 +643,12 @@ module snitch_cluster
   localparam addr_t ExtAliasStart = PeriphAliasEnd;
   localparam addr_t ExtAliasEnd   = ExtAliasStart + ExtMemorySize * 1024;
 
+  // Size of the cluster address space rounded up to the next power of 2.
+  localparam int unsigned ClusterAddrSize = TcdmSizeNapotRounded +
+      (IntBootromEnable ? BootromSize * 1024 : 0) + ClusterPeriphSize * 1024 +
+      ExtMemorySize * 1024;
+  localparam int unsigned ClusterAddrSizeNapotRounded = 1 << $clog2(ClusterAddrSize);
+
   // ----------------
   // Wire Definitions
   // ----------------
@@ -1494,7 +1500,7 @@ module snitch_cluster
   assign cluster_xbar_default_rule = '{
     idx: SoC,
     start_addr: tcdm_start_address,
-    end_addr: ext_mem_end_address
+    end_addr: tcdm_start_address + ClusterAddrSizeNapotRounded
   };
 
   // Define the address map for the narrow XBAR
@@ -1823,6 +1829,12 @@ module snitch_cluster
   `ASSERT_INIT(CheckSuperBankInHyperBank, (BanksPerHyperBank % BanksPerSuperBank) == 0);
   // Check that the cluster base address aligns to the TcdmSizeNapotRounded.
   `ASSERT(ClusterBaseAddrAlign, ((TcdmSizeNapotRounded - 1) & cluster_base_addr_i) == 0)
+  // Check that the cluster base address aligns to the ClusterAddrSizeNapotRounded.
+  `ASSERT(ClusterAddrSpaceAlign, ~EnableNarrowCollectives ||
+    ((ClusterAddrSizeNapotRounded - 1) & cluster_base_addr_i) == 0)
+  // Check that the rounded cluster address space does not overlap the next cluster.
+  `ASSERT(ClusterAddrSpaceFitsOffset, ~EnableNarrowCollectives || (cluster_base_offset_i == 0) ||
+    (ClusterAddrSizeNapotRounded <= cluster_base_offset_i))
   // Check that the cluster alias address, if enabled, aligns to the TcdmSizeNapotRounded.
   `ASSERT_INIT(AliasRegionAddrAlign,
     ~AliasRegionEnable || ((TcdmSizeNapotRounded - 1) & AliasRegionBase) == 0)
